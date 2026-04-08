@@ -10,7 +10,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 下载解压源码并重命名
 RUN VER="${OLIVOS_VERSION#v}" && \
     curl -fsSL "https://github.com/OlivOS-Team/OlivOS/archive/refs/tags/${OLIVOS_VERSION}.tar.gz" \
         -o src.tar.gz && \
@@ -18,21 +17,24 @@ RUN VER="${OLIVOS_VERSION#v}" && \
     mv "OlivOS-${VER}" OlivOS && \
     rm src.tar.gz
 
-# 创建 venv 并安装依赖
-RUN python3 -m venv /app/venv
-RUN /app/venv/bin/pip install --no-cache-dir --upgrade pip && \
-    /app/venv/bin/pip install --no-cache-dir -r OlivOS/requirements.txt
+# 打印 requirements.txt 内容，确认文件存在且内容正确
+RUN echo "=== requirements.txt ===" && cat OlivOS/requirements.txt
 
-# 下载预装插件
+RUN python3 -m venv /app/venv
+
+# 升级 pip（单独一步）
+RUN /app/venv/bin/pip install --no-cache-dir -v --upgrade pip
+
+# 安装依赖（单独一步，-v 输出完整错误）
+RUN /app/venv/bin/pip install --no-cache-dir -v -r OlivOS/requirements.txt
+
 COPY opk.txt download_plugins.py ./
 RUN /app/venv/bin/python download_plugins.py && rm download_plugins.py opk.txt
 
-# 清理 venv 中无用文件
 RUN find /app/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
     find /app/venv -type f -name '*.pyi' -delete 2>/dev/null || true && \
     find /app/venv -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true
 
-# ---- 最终镜像 ----
 FROM debian:12-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
