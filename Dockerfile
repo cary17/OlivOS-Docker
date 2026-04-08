@@ -1,7 +1,8 @@
 # ==================== 阶段一：构建阶段 (Builder) ====================
 FROM debian:12-slim AS builder
 
-ARG OLIVOS_VERSION
+# 修改构建参数名，使其语义更清晰
+ARG OLIVOS_RAW_VERSION
 ARG DEBIAN_FRONTEND=noninteractive
 
 # 安装编译依赖和工具
@@ -15,25 +16,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 复制并执行下载脚本
+# 复制并执行下载脚本（传递原始版本号）
 COPY download_source.sh .
 RUN chmod +x download_source.sh && \
-    ./download_source.sh "${OLIVOS_VERSION}" && \
+    ./download_source.sh "${OLIVOS_RAW_VERSION}" && \
     rm download_source.sh
 
-# 复制 requirements.txt 并安装 Python 依赖
-COPY requirements.txt .
+# ... (后续安装依赖、插件等步骤与之前完全相同，此处省略以保持简洁) ...
 
+# 确保后续步骤也使用正确的环境
+COPY requirements.txt .
 RUN python3 -m venv /app/venv && \
     /app/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel
-
 RUN /app/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-# 下载插件
+# 下载插件等操作...
 COPY opk.txt download_plugins.py ./
 RUN /app/venv/bin/python download_plugins.py && rm download_plugins.py opk.txt
 
-# 复制本地 OPK 插件并安装
 COPY opk/ ./opk_local/
 RUN find ./opk_local -name '*.opk' -exec cp {} OlivOS/plugin/app/ \; && \
     rm -rf ./opk_local
