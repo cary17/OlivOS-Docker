@@ -22,7 +22,7 @@ with open("opk.txt", encoding="utf-8") as f:
         for asset in data["assets"]:
             if asset["name"].endswith(".opk"):
                 dest = os.path.join(PLUGIN_DIR, name)
-                print(f"Downloading {name} from {asset['browser_download_url']}")
+                print(f"Downloading {name} ← {asset['browser_download_url']}")
                 urllib.request.urlretrieve(asset["browser_download_url"], dest)
                 break
         else:
