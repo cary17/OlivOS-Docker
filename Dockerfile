@@ -27,16 +27,13 @@ RUN python3 -m venv /app/venv && \
 
 RUN /app/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-# 下载预装插件
 COPY opk.txt download_plugins.py ./
 RUN /app/venv/bin/python download_plugins.py && rm download_plugins.py opk.txt
 
-# 清理无用文件
 RUN find /app/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
     find /app/venv -type f -name '*.pyi' -delete 2>/dev/null || true && \
     find /app/venv -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true
 
-# ---- 最终镜像 ----
 FROM debian:12-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -51,4 +48,11 @@ COPY --from=builder /app/venv ./venv
 COPY --from=builder /app/OlivOS ./OlivOS
 
 ENV PATH="/app/venv/bin:$PATH"
-ENV V
+ENV VIRTUAL_ENV="/app/venv"
+ENV PYTHONUNBUFFERED="1"
+ENV PYTHONDONTWRITEBYTECODE="1"
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
