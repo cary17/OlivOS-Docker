@@ -1,0 +1,13 @@
+services:
+  olivos:
+    image: ghcr.io/your-username/olivos:latest  # 替换为你的用户名
+    container_name: olivos
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./data:/app/OlivOS/data
+    environment:
+      # 添加额外 pip 依赖，多个用空格分隔
+      # EXTRA_PACKAGES: "package1 package2"
+      pass:
