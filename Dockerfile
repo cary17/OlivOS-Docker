@@ -27,9 +27,16 @@ RUN python3 -m venv /app/venv && \
 
 RUN /app/venv/bin/pip install --no-cache-dir -r requirements.txt
 
+# 下载远程插件
 COPY opk.txt download_plugins.py ./
 RUN /app/venv/bin/python download_plugins.py && rm download_plugins.py opk.txt
 
+# 复制本地预置插件（opk/ 文件夹下的 .opk 文件）
+COPY opk/ ./opk_local/
+RUN find ./opk_local -name '*.opk' -exec cp {} OlivOS/plugin/app/ \; && \
+    rm -rf ./opk_local
+
+# 清理无用文件
 RUN find /app/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
     find /app/venv -type f -name '*.pyi' -delete 2>/dev/null || true && \
     find /app/venv -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true
