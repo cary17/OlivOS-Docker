@@ -15,13 +15,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 下载并解压 OlivOS 源码
-RUN VER="${OLIVOS_VERSION#v}" && \
-    curl -fsSL "https://github.com/OlivOS-Team/OlivOS/archive/refs/tags/${OLIVOS_VERSION}.tar.gz" \
-        -o src.tar.gz && \
-    tar -xzf src.tar.gz && \
-    mv "OlivOS-${VER}" OlivOS && \
-    rm src.tar.gz
+# 复制并执行下载脚本
+COPY download_source.sh .
+RUN chmod +x download_source.sh && \
+    ./download_source.sh "${OLIVOS_VERSION}" && \
+    rm download_source.sh
 
 # 复制 requirements.txt 并安装 Python 依赖
 COPY requirements.txt .
