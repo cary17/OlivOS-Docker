@@ -18,12 +18,16 @@ RUN VER="${OLIVOS_VERSION#v}" && \
     mv "OlivOS-${VER}" OlivOS && \
     rm src.tar.gz
 
-# 安装依赖：优先安装 OlivOS 自带的，再叠加本仓库的
+# 安装 OlivOS 自带依赖（如有）
+RUN if [ -f OlivOS/requirements.txt ]; then \
+        pip3 install --no-cache-dir --break-system-packages -r OlivOS/requirements.txt; \
+    fi
+
+# 安装本仓库额外依赖（如有）
 COPY requirements.txt ./requirements.extra.txt
-RUN pip3 install --no-cache-dir --break-system-packages \
-        $([ -f OlivOS/requirements.txt ] && echo "-r OlivOS/requirements.txt") \
-        -r requirements.extra.txt && \
-    rm requirements.extra.txt
+RUN if [ -s requirements.extra.txt ]; then \
+        pip3 install --no-cache-dir --break-system-packages -r requirements.extra.txt; \
+    fi && rm requirements.extra.txt
 
 # 下载预装插件
 COPY opk.txt download_plugins.py ./
