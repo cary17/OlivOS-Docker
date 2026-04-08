@@ -5,7 +5,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-venv python3-dev \
-        gcc libffi-dev libssl-dev libev-dev \
+        gcc g++ libffi-dev libssl-dev libev-dev \
         libxml2-dev libxslt1-dev \
         libjpeg-dev zlib1g-dev \
         curl ca-certificates \
@@ -22,7 +22,6 @@ RUN VER="${OLIVOS_VERSION#v}" && \
 
 COPY requirements.txt .
 
-# 先装 setuptools/wheel 确保后续所有包的编译环境完整
 RUN python3 -m venv /app/venv && \
     /app/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel
 
@@ -52,11 +51,4 @@ COPY --from=builder /app/venv ./venv
 COPY --from=builder /app/OlivOS ./OlivOS
 
 ENV PATH="/app/venv/bin:$PATH"
-ENV VIRTUAL_ENV=/app/venv
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-ENTRYPOINT ["/entrypoint.sh"]
+ENV V
