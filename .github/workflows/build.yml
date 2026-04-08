@@ -36,7 +36,12 @@ jobs:
           if [ -z "$RAW" ] || [ "$RAW" = "null" ]; then
             echo "Failed to get version" && exit 1
           fi
-          VERSION="v${RAW#v}"
+          # 确保版本号带 v 前缀（用于 Docker tag）
+          if [[ "$RAW" =~ ^v ]]; then
+            VERSION="$RAW"
+          else
+            VERSION="v$RAW"
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Detected version: $VERSION"
 
