@@ -29,13 +29,14 @@ jobs:
       - name: Get latest OlivOS release version
         id: version
         run: |
-          VERSION=$(curl -sf \
+          RAW=$(curl -sf \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             https://api.github.com/repos/OlivOS-Team/OlivOS/releases/latest \
             | jq -r '.tag_name')
-          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+          if [ -z "$RAW" ] || [ "$RAW" = "null" ]; then
             echo "Failed to get version" && exit 1
           fi
+          VERSION="v${RAW#v}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Detected version: $VERSION"
 
