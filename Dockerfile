@@ -5,7 +5,10 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-venv python3-dev \
-        gcc libffi-dev libssl-dev curl ca-certificates \
+        gcc libffi-dev libssl-dev \
+        libxml2-dev libxslt-dev \
+        libjpeg-dev zlib1g-dev \
+        curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -17,16 +20,16 @@ RUN VER="${OLIVOS_VERSION#v}" && \
     mv "OlivOS-${VER}" OlivOS && \
     rm src.tar.gz
 
-# 打印 requirements.txt 内容，确认文件存在且内容正确
 RUN echo "=== requirements.txt ===" && cat OlivOS/requirements.txt
 
 RUN python3 -m venv /app/venv
 
-# 升级 pip（单独一步）
-RUN /app/venv/bin/pip install --no-cache-dir -v --upgrade pip
+RUN /app/venv/bin/pip install --no-cache-dir --upgrade pip
 
-# 安装依赖（单独一步，-v 输出完整错误）
-RUN /app/venv/bin/pip install --no-cache-dir -v -r OlivOS/requirements.txt
+RUN /app/venv/bin/pip install --no-cache-dir -r OlivOS/requirements.txt \
+    2>&1 | tee /tmp/pip.log; \
+    grep -iE "^error|could not|no matching|failed" /tmp/pip.log || true; \
+    grep -c "Successfully installed" /tmp/pip.log > /dev/null
 
 COPY opk.txt download_plugins.py ./
 RUN /app/venv/bin/python download_plugins.py && rm download_plugins.py opk.txt
