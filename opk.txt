@@ -1,0 +1,7 @@
+OlivaDiceCore.opk：https://github.com/OlivOS-Team/OlivaDiceCore/releases
+OlivaDiceLogger.opk：https://github.com/OlivOS-Team/OlivaDiceLogger/releases
+OlivaStoryCore.opk：https://github.com/OlivOS-Team/OlivaStoryCore/releases
+OlivaDiceOdyssey.opk：https://github.com/OlivOS-Team/OlivaDiceOdyssey/releases
+OlivaDiceMaster.opk：https://github.com/OlivOS-Team/OlivaDiceMaster/releases
+OlivaDiceJoy.opk：https://github.com/OlivOS-Team/OlivaDiceJoy/releases
+ChanceCustom.opk：https://github.com/OlivOS-Team/ChanceCustom/releases
