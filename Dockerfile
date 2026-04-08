@@ -5,8 +5,8 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-venv python3-dev \
-        gcc libffi-dev libssl-dev \
-        libxml2-dev libxslt-dev \
+        gcc libffi-dev libssl-dev libev-dev \
+        libxml2-dev libxslt1-dev \
         libjpeg-dev zlib1g-dev \
         curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -20,30 +20,28 @@ RUN VER="${OLIVOS_VERSION#v}" && \
     mv "OlivOS-${VER}" OlivOS && \
     rm src.tar.gz
 
-RUN echo "=== requirements.txt ===" && cat OlivOS/requirements.txt
+# 使用本仓库根目录的 requirements.txt 安装依赖
+COPY requirements.txt .
+RUN python3 -m venv /app/venv && \
+    /app/venv/bin/pip install --no-cache-dir --upgrade pip && \
+    /app/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-RUN python3 -m venv /app/venv
-
-RUN /app/venv/bin/pip install --no-cache-dir --upgrade pip
-
-RUN /app/venv/bin/pip install --no-cache-dir -r OlivOS/requirements.txt \
-    2>&1 | tee /tmp/pip.log; \
-    grep -iE "^error|could not|no matching|failed" /tmp/pip.log || true; \
-    grep -c "Successfully installed" /tmp/pip.log > /dev/null
-
+# 下载预装插件
 COPY opk.txt download_plugins.py ./
 RUN /app/venv/bin/python download_plugins.py && rm download_plugins.py opk.txt
 
+# 清理无用文件
 RUN find /app/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
     find /app/venv -type f -name '*.pyi' -delete 2>/dev/null || true && \
     find /app/venv -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true
 
+# ---- 最终镜像 ----
 FROM debian:12-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 ca-certificates \
+        python3 libev4 ca-certificates \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 WORKDIR /app
