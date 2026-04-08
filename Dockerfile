@@ -20,11 +20,13 @@ RUN VER="${OLIVOS_VERSION#v}" && \
     mv "OlivOS-${VER}" OlivOS && \
     rm src.tar.gz
 
-# 使用本仓库根目录的 requirements.txt 安装依赖
 COPY requirements.txt .
+
+# 先装 setuptools/wheel 确保后续所有包的编译环境完整
 RUN python3 -m venv /app/venv && \
-    /app/venv/bin/pip install --no-cache-dir --upgrade pip && \
-    /app/venv/bin/pip install --no-cache-dir -r requirements.txt
+    /app/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel
+
+RUN /app/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # 下载预装插件
 COPY opk.txt download_plugins.py ./
