@@ -1,13 +1,14 @@
 services:
   olivos:
-    image: ghcr.io/your-username/olivos:latest  # 替换为你的用户名
+    image: ghcr.io/cary17/olivos:latest
+    image: cary17/olivos:latest
     container_name: olivos
-    restart: unless-stopped
-    stdin_open: true
-    tty: true
+    restart: always
     volumes:
-      - ./data:/app/OlivOS/data
+      - ./conf:/app/OlivOS/conf
+      - ./plugin:/app/OlivOS/plugin
     environment:
+      TZ: Asia/Shanghai
       # 添加额外 pip 依赖，多个用空格分隔
-      # EXTRA_PACKAGES: "package1 package2"
+      #EXTRA_PACKAGES: "psutil==5.9.0 lxml>=4.9"
       pass:
