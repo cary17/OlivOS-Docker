@@ -1,6 +1,5 @@
 requests-toolbelt
 qrcode
-psutil
 Flask==2.0.2
 Werkzeug==2.2.2
 gevent>=23.9.1
