@@ -1,142 +1,74 @@
-name: Build and Push Docker Image
+# ==================== 阶段一：构建阶段 (Builder) ====================
+FROM python:3.11-slim AS builder
 
-on:
-  schedule:
-    - cron: '0 */12 * * *'
-  workflow_dispatch:
-    inputs:
-      force_build:
-        description: 'Force build even if image exists'
-        required: false
-        type: boolean
-        default: false
+ARG OLIVOS_RAW_VERSION
+ARG DEBIAN_FRONTEND=noninteractive
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+# 安装编译依赖（python:3.11-slim 已包含 python3-dev）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc g++ \
+        libffi-dev libssl-dev \
+        libxml2-dev libxslt1-dev \
+        libjpeg-dev zlib1g-dev \
+        curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-permissions:
-  contents: read
-  packages: write
-  attestations: write
-  id-token: write
+WORKDIR /app
 
-jobs:
-  check:
-    runs-on: ubuntu-latest
-    outputs:
-      raw_version: ${{ steps.version.outputs.raw_version }}
-      docker_tag: ${{ steps.version.outputs.docker_tag }}
-      skip: ${{ steps.check.outputs.skip }}
-      dockerhub_enabled: ${{ steps.dockerhub_check.outputs.enabled }}
+# 下载 OlivOS 源码
+COPY download_source.sh .
+RUN chmod +x download_source.sh && \
+    ./download_source.sh "${OLIVOS_RAW_VERSION}" && \
+    rm download_source.sh
 
-    steps:
-      - name: Get latest OlivOS release version
-        id: version
-        run: |
-          RAW=$(curl -sf \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            https://api.github.com/repos/OlivOS-Team/OlivOS/releases/latest \
-            | jq -r '.tag_name')
-          if [ -z "$RAW" ] || [ "$RAW" = "null" ]; then
-            echo "Failed to get version" && exit 1
-          fi
-          echo "raw_version=$RAW" >> $GITHUB_OUTPUT
-          echo "docker_tag=v$RAW" >> $GITHUB_OUTPUT
-          echo "Detected raw version: $RAW, Docker tag will be: v$RAW"
+# 创建虚拟环境并安装依赖
+COPY requirements.txt .
+RUN python -m venv /app/venv && \
+    /app/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    /app/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-      - name: Check Docker Hub secrets
-        id: dockerhub_check
-        run: |
-          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
-            echo "enabled=true" >> $GITHUB_OUTPUT
-            echo "Docker Hub is enabled"
-          else
-            echo "enabled=false" >> $GITHUB_OUTPUT
-            echo "Docker Hub is disabled (secrets not found)"
-          fi
+# 下载插件
+COPY opk.txt download_plugins.py ./
+RUN /app/venv/bin/python download_plugins.py && rm download_plugins.py opk.txt
 
-      - name: Login to GHCR for check
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GHCR_PAT }}
+# 复制本地 OPK 文件（如果有）
+COPY opk/ ./opk_local/ 2>/dev/null || true
+RUN if [ -d ./opk_local ]; then \
+        find ./opk_local -name '*.opk' -exec cp {} OlivOS/plugin/app/ \; && \
+        rm -rf ./opk_local; \
+    fi
 
-      - name: Check if image already exists on GHCR
-        id: check
-        run: |
-          REPO_OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          DOCKER_TAG=${{ steps.version.outputs.docker_tag }}
-          if docker manifest inspect ghcr.io/${REPO_OWNER_LC}/olivos:${DOCKER_TAG} > /dev/null 2>&1 \
-            && [ "${{ inputs.force_build }}" != "true" ]; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-            echo "Image ${DOCKER_TAG} already exists on GHCR, skipping build."
-          else
-            echo "skip=false" >> $GITHUB_OUTPUT
-            echo "Image ${DOCKER_TAG} not found on GHCR, will build."
-          fi
+# 清理缓存
+RUN rm -rf /root/.cache/pip && \
+    find /app/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 
-  build:
-    runs-on: ubuntu-latest
-    needs: check
-    if: needs.check.outputs.skip == 'false'
-    permissions:
-      contents: read
-      packages: write
-      attestations: write
-      id-token: write
+# ==================== 阶段二：最终运行阶段 ====================
+FROM python:3.11-slim
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+ARG DEBIAN_FRONTEND=noninteractive
 
-      - name: Set environment variables
-        run: |
-          echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER@L}" >> $GITHUB_ENV
-          echo "DOCKER_TAG=${{ needs.check.outputs.docker_tag }}" >> $GITHUB_ENV
-          echo "RAW_VERSION=${{ needs.check.outputs.raw_version }}" >> $GITHUB_ENV
+# 运行阶段只需要基础运行时
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GHCR_PAT }}
+WORKDIR /app
 
-      - name: Login to Docker Hub
-        if: needs.check.outputs.dockerhub_enabled == 'true'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+# 从构建阶段复制虚拟环境和源码
+COPY --from=builder /app/venv /app/venv
+COPY --from=builder /app/OlivOS /app/OlivOS
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+# 设置环境变量，优先使用虚拟环境
+ENV PATH="/app/venv/bin:$PATH"
+ENV VIRTUAL_ENV="/app/venv"
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+# 验证关键模块是否安装成功
+RUN /app/venv/bin/python -c "import psutil; print(f'✓ psutil {psutil.__version__} installed successfully')"
 
-      - name: Build and push multi-architecture image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          build-args: OLIVOS_RAW_VERSION=${{ env.RAW_VERSION }}
-          tags: |
-            ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:${{ env.DOCKER_TAG }}
-            ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:latest
-            ${{ needs.check.outputs.dockerhub_enabled == 'true' && format('{0}/olivos:{1}', secrets.DOCKERHUB_USERNAME, env.DOCKER_TAG) || '' }}
-            ${{ needs.check.outputs.dockerhub_enabled == 'true' && format('{0}/olivos:latest', secrets.DOCKERHUB_USERNAME) || '' }}
-          provenance: false
-          sbom: false
+# 复制并设置入口点脚本
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-      - name: Verify multi-arch manifest
-        run: |
-          echo "Verifying GHCR manifest:"
-          docker buildx imagetools inspect ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:${{ env.DOCKER_TAG }}
-          
-          if [ "${{ needs.check.outputs.dockerhub_enabled }}" = "true" ]; then
-            echo "Verifying Docker Hub manifest:"
-            docker buildx imagetools inspect ${{ secrets.DOCKERHUB_USERNAME }}/olivos:${{ env.DOCKER_TAG }}
-          fi
+ENTRYPOINT ["/entrypoint.sh"]
