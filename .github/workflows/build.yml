@@ -116,29 +116,31 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push to GHCR
+      # 关键改动：一次构建所有架构，同时推送到两个 registry
+      - name: Build and push multi-architecture image
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: OLIVOS_RAW_VERSION=${{ env.RAW_VERSION }}
+          # 同时定义 GHCR 和 Docker Hub 的 tags
           tags: |
             ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:${{ env.DOCKER_TAG }}
             ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:latest
+            ${{ needs.check.outputs.dockerhub_enabled == 'true' && format('{0}/olivos:{1}', secrets.DOCKERHUB_USERNAME, env.DOCKER_TAG) || '' }}
+            ${{ needs.check.outputs.dockerhub_enabled == 'true' && format('{0}/olivos:latest', secrets.DOCKERHUB_USERNAME) || '' }}
+          # 重要：启用 manifest list 创建
           provenance: false
           sbom: false
 
-      - name: Build and push to Docker Hub
-        if: needs.check.outputs.dockerhub_enabled == 'true'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          build-args: OLIVOS_RAW_VERSION=${{ env.RAW_VERSION }}
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/olivos:${{ env.DOCKER_TAG }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/olivos:latest
-          provenance: false
-          sbom: false
+      # 可选：验证 manifest list
+      - name: Verify multi-arch manifest
+        run: |
+          echo "Verifying GHCR manifest:"
+          docker buildx imagetools inspect ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:${{ env.DOCKER_TAG }}
+          
+          if [ "${{ needs.check.outputs.dockerhub_enabled }}" = "true" ]; then
+            echo "Verifying Docker Hub manifest:"
+            docker buildx imagetools inspect ${{ secrets.DOCKERHUB_USERNAME }}/olivos:${{ env.DOCKER_TAG }}
+          fi
