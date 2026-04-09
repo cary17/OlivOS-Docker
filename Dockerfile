@@ -4,7 +4,7 @@ FROM python:3.11-slim AS builder
 ARG OLIVOS_RAW_VERSION
 ARG DEBIAN_FRONTEND=noninteractive
 
-# 安装编译依赖（python:3.11-slim 已包含 python3-dev）
+# 安装编译依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc g++ \
         libffi-dev libssl-dev \
@@ -21,53 +21,41 @@ RUN chmod +x download_source.sh && \
     ./download_source.sh "${OLIVOS_RAW_VERSION}" && \
     rm download_source.sh
 
-# 创建虚拟环境并安装依赖
+# 直接安装到系统 Python（不需要虚拟环境）
 COPY requirements.txt .
-RUN python -m venv /app/venv && \
-    /app/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    /app/venv/bin/pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
 
 # 下载插件
 COPY opk.txt download_plugins.py ./
-RUN /app/venv/bin/python download_plugins.py && rm download_plugins.py opk.txt
-
-# 复制本地 OPK 文件（如果有）
-COPY opk/ ./opk_local/ 2>/dev/null || true
-RUN if [ -d ./opk_local ]; then \
-        find ./opk_local -name '*.opk' -exec cp {} OlivOS/plugin/app/ \; && \
-        rm -rf ./opk_local; \
-    fi
+RUN python download_plugins.py && rm download_plugins.py opk.txt
 
 # 清理缓存
 RUN rm -rf /root/.cache/pip && \
-    find /app/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
+    find /usr/local/lib/python3.11 -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 
 # ==================== 阶段二：最终运行阶段 ====================
 FROM python:3.11-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# 运行阶段只需要基础运行时
+# 运行时依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# 从构建阶段复制虚拟环境和源码
-COPY --from=builder /app/venv /app/venv
+# 从构建阶段复制已安装的 Python 包和源码
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /app/OlivOS /app/OlivOS
 
-# 设置环境变量，优先使用虚拟环境
-ENV PATH="/app/venv/bin:$PATH"
-ENV VIRTUAL_ENV="/app/venv"
+# 设置环境变量（不需要 VIRTUAL_ENV 和 PATH 修改）
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# 验证关键模块是否安装成功
-RUN /app/venv/bin/python -c "import psutil; print(f'✓ psutil {psutil.__version__} installed successfully')"
-
-# 复制并设置入口点脚本
+# 入口点
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
