@@ -1,14 +1,13 @@
 services:
   olivos:
-    image: ghcr.io/cary17/olivos:latest
-    image: cary17/olivos:latest
+    image: ghcr.io/cary17/olivos:latest  # 生产版（含OPK插件）
+    # image: ghcr.io/cary17/olivos:latest-dev  # 开发版（无OPK插件，含开发工具）
     container_name: olivos
     restart: always
     volumes:
-      - ./conf:/app/OlivOS/conf
-      - ./plugin:/app/OlivOS/plugin
+      - /opt/olivos/conf:/app/OlivOS/conf
+      - /opt/olivos/plugin:/app/OlivOS/plugin
     environment:
       TZ: Asia/Shanghai
       # 添加额外 pip 依赖，多个用空格分隔
       #EXTRA_PACKAGES: "psutil==5.9.0 lxml>=4.9"
-      pass:
