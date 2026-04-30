@@ -26,3 +26,12 @@ docker compose up -d
 | `EXTRA_PACKAGES` | 启动时额外安装的 pip 包，空格分隔 |
 
 
+脚本运行安装
+国外
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/cary17/OlivOS-Docker/main/OlivOS.sh)"
+```
+国内
+```bash
+bash -c "$(curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/cary17/OlivOS-Docker/main/OlivOS.sh)"
+```
