@@ -1,7 +1,7 @@
 services:
   olivos:
     image: ghcr.io/cary17/olivos:latest  # 生产版（含OPK插件）
-    # image: ghcr.io/cary17/olivos:latest-core # 核心版：核心 + 插件生态，无 OPK 插件
+    # image: ghcr.io/cary17/olivos:latest-core # 核心版（核心 + 插件生态，无 OPK 插件）
     # image: ghcr.io/cary17/olivos:latest-dev  # 开发版（无OPK插件，含开发工具）
     container_name: olivos
     restart: always
