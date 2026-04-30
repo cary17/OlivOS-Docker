@@ -25,10 +25,4 @@ docker compose up -d
 |---|---|
 | `EXTRA_PACKAGES` | 启动时额外安装的 pip 包，空格分隔 |
 
-## 手动触发构建
 
-在 GitHub Actions 页面点击 **Run workflow**，可勾选 **Force build** 强制重新构建。
-
-## 添加插件
-
-在 `opk.txt` 末尾追加一行：
