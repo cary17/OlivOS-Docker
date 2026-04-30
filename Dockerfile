@@ -22,8 +22,12 @@ RUN chmod +x download_source.sh && \
     ./download_source.sh "${OLIVOS_RAW_VERSION}" && \
     rm download_source.sh
 
-# 复制依赖配置文件
-COPY pyproject.toml requirements.txt ./
+# 注意：此时 pyproject.toml 在 /app/OlivOS/ 目录下
+# 切换到源码目录
+WORKDIR /app/OlivOS
+
+# 复制备用 requirements.txt（如果存在）
+COPY requirements.txt* /tmp/ 2>/dev/null || true
 
 # 升级 pip 和安装构建工具
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
@@ -34,13 +38,12 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # 第1层：优先使用 pyproject.toml 安装核心依赖
 RUN if [ -f "pyproject.toml" ]; then \
-        echo "=== Installing from pyproject.toml ===" && \
-        cd OlivOS && \
+        echo "=== Installing from pyproject.toml (core dependencies) ===" && \
         pip install --no-cache-dir .; \
-    elif [ -f "requirements.txt" ]; then \
+    elif [ -f "/tmp/requirements.txt" ]; then \
         echo "=== pyproject.toml not found, using requirements.txt ===" && \
         # 提取核心依赖（排除注释和开发工具）
-        grep -v "^#" requirements.txt | grep -v "^$" | grep -v "^pytest" | grep -v "^black" | grep -v "^flake8" | grep -v "^ruff" | xargs pip install --no-cache-dir; \
+        grep -v "^#" /tmp/requirements.txt | grep -v "^$" | grep -v "pytest" | grep -v "black" | grep -v "flake8" | grep -v "ruff" | xargs pip install --no-cache-dir; \
     else \
         echo "ERROR: No dependency file found!" && exit 1; \
     fi
@@ -48,10 +51,9 @@ RUN if [ -f "pyproject.toml" ]; then \
 # 第2层：安装插件生态依赖 (extend) - 所有版本都需要
 RUN if [ -f "pyproject.toml" ]; then \
         echo "=== Installing extend dependencies ===" && \
-        cd OlivOS && \
         pip install --no-cache-dir .[extend] || \
         pip install --no-cache-dir lxml pyyaml openpyxl APScheduler==3.10.1 js2py certifi httpx "prompt-toolkit" regex rich; \
-    else \
+    elif [ -f "/tmp/requirements.txt" ]; then \
         echo "=== Installing extend dependencies from requirements.txt ===" && \
         pip install --no-cache-dir lxml pyyaml openpyxl APScheduler==3.10.1 js2py certifi httpx "prompt-toolkit" regex rich; \
     fi
@@ -60,12 +62,15 @@ RUN if [ -f "pyproject.toml" ]; then \
 RUN if [ "$BUILD_TYPE" = "dev" ]; then \
         echo "=== Installing dev tools ===" && \
         if [ -f "pyproject.toml" ]; then \
-            cd OlivOS && pip install --no-cache-dir .[dev] || \
+            pip install --no-cache-dir .[dev] || \
             pip install --no-cache-dir pytest black flake8 ruff; \
         else \
             pip install --no-cache-dir pytest black flake8 ruff; \
         fi \
     fi
+
+# 返回上层目录进行插件处理
+WORKDIR /app
 
 # 第4层：下载 OPK 插件 - 仅 full 版本
 RUN if [ "$BUILD_TYPE" = "full" ]; then \
