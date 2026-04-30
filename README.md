@@ -10,8 +10,8 @@
 
 ## 镜像地址
 
-- Docker Hub: `your-username/olivos`
-- GHCR: `ghcr.io/your-username/olivos`
+- Docker Hub: `cary17/olivos`
+- GHCR: `ghcr.io/cary17/olivos`
 
 ## 使用方法
 
