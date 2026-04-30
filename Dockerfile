@@ -2,7 +2,7 @@
 FROM python:3.11-slim AS builder
 
 ARG OLIVOS_RAW_VERSION
-ARG BUILD_TYPE=full  # full 或 dev
+ARG BUILD_TYPE=full  # full, core, dev
 
 # 安装编译依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -29,18 +29,27 @@ COPY pyproject.toml* requirements.txt* ./
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     if [ -f "pyproject.toml" ]; then \
         echo "Installing from pyproject.toml..."; \
-        if [ "$BUILD_TYPE" = "dev" ]; then \
-            echo "Dev build: installing core + extend + dev dependencies..."; \
-            pip install --no-cache-dir ./OlivOS[extend,dev] || \
-            pip install --no-cache-dir ./OlivOS && \
-            pip install --no-cache-dir "lxml" "pyyaml" "openpyxl" "APScheduler==3.10.1" "js2py" "certifi" "httpx" "prompt-toolkit" "regex" "rich" && \
-            pip install --no-cache-dir "pytest" "black" "flake8" "ruff"; \
-        else \
-            echo "Full build: installing core + extend dependencies..."; \
-            pip install --no-cache-dir ./OlivOS[extend] || \
-            pip install --no-cache-dir ./OlivOS && \
-            pip install --no-cache-dir "lxml" "pyyaml" "openpyxl" "APScheduler==3.10.1" "js2py" "certifi" "httpx" "prompt-toolkit" "regex" "rich"; \
-        fi; \
+        case "$BUILD_TYPE" in \
+            dev) \
+                echo "Dev build: installing core + extend + dev dependencies..."; \
+                pip install --no-cache-dir ./OlivOS[extend,dev] || \
+                (pip install --no-cache-dir ./OlivOS && \
+                 pip install --no-cache-dir "lxml" "pyyaml" "openpyxl" "APScheduler==3.10.1" "js2py" "certifi" "httpx" "prompt-toolkit" "regex" "rich" && \
+                 pip install --no-cache-dir "pytest" "black" "flake8" "ruff"); \
+                ;; \
+            core) \
+                echo "Core build: installing core + extend dependencies (no OPK plugins)..."; \
+                pip install --no-cache-dir ./OlivOS[extend] || \
+                (pip install --no-cache-dir ./OlivOS && \
+                 pip install --no-cache-dir "lxml" "pyyaml" "openpyxl" "APScheduler==3.10.1" "js2py" "certifi" "httpx" "prompt-toolkit" "regex" "rich"); \
+                ;; \
+            *) \
+                echo "Full build: installing core + extend dependencies..."; \
+                pip install --no-cache-dir ./OlivOS[extend] || \
+                (pip install --no-cache-dir ./OlivOS && \
+                 pip install --no-cache-dir "lxml" "pyyaml" "openpyxl" "APScheduler==3.10.1" "js2py" "certifi" "httpx" "prompt-toolkit" "regex" "rich"); \
+                ;; \
+        esac; \
     elif [ -f "requirements.txt" ]; then \
         echo "pyproject.toml not found, using requirements.txt..."; \
         pip install --no-cache-dir -r requirements.txt; \
@@ -63,7 +72,7 @@ RUN if [ "$BUILD_TYPE" = "full" ]; then \
         find ./opk_local -name '*.opk' -exec cp {} OlivOS/plugin/app/ \; 2>/dev/null || true; \
         rm -rf ./opk_local; \
     else \
-        echo "Dev build: skipping OPK plugins installation"; \
+        echo "$BUILD_TYPE build: skipping OPK plugins installation"; \
     fi
 
 # 清理：删除缓存、__pycache__、tests、test 目录
