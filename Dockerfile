@@ -22,57 +22,34 @@ RUN chmod +x download_source.sh && \
     ./download_source.sh "${OLIVOS_RAW_VERSION}" && \
     rm download_source.sh
 
-# 注意：此时 pyproject.toml 在 /app/OlivOS/ 目录下
-# 切换到源码目录
+# 切换到源码目录（pyproject.toml 在这里）
 WORKDIR /app/OlivOS
-
-# 复制备用 requirements.txt（如果存在）
-COPY requirements.txt* /tmp/ 2>/dev/null || true
 
 # 升级 pip 和安装构建工具
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # ============================================
-# 安装 Python 依赖（分层安装，优化缓存）
+# 安装 Python 依赖（根据 BUILD_TYPE）
 # ============================================
 
-# 第1层：优先使用 pyproject.toml 安装核心依赖
-RUN if [ -f "pyproject.toml" ]; then \
-        echo "=== Installing from pyproject.toml (core dependencies) ===" && \
-        pip install --no-cache-dir .; \
-    elif [ -f "/tmp/requirements.txt" ]; then \
-        echo "=== pyproject.toml not found, using requirements.txt ===" && \
-        # 提取核心依赖（排除注释和开发工具）
-        grep -v "^#" /tmp/requirements.txt | grep -v "^$" | grep -v "pytest" | grep -v "black" | grep -v "flake8" | grep -v "ruff" | xargs pip install --no-cache-dir; \
-    else \
-        echo "ERROR: No dependency file found!" && exit 1; \
-    fi
+# 安装核心依赖
+RUN echo "=== Installing core dependencies ===" && \
+    pip install --no-cache-dir .
 
-# 第2层：安装插件生态依赖 (extend) - 所有版本都需要
-RUN if [ -f "pyproject.toml" ]; then \
-        echo "=== Installing extend dependencies ===" && \
-        pip install --no-cache-dir .[extend] || \
-        pip install --no-cache-dir lxml pyyaml openpyxl APScheduler==3.10.1 js2py certifi httpx "prompt-toolkit" regex rich; \
-    elif [ -f "/tmp/requirements.txt" ]; then \
-        echo "=== Installing extend dependencies from requirements.txt ===" && \
-        pip install --no-cache-dir lxml pyyaml openpyxl APScheduler==3.10.1 js2py certifi httpx "prompt-toolkit" regex rich; \
-    fi
+# 安装插件生态依赖 extend（所有版本都需要）
+RUN echo "=== Installing extend dependencies ===" && \
+    pip install --no-cache-dir .[extend]
 
-# 第3层：安装开发工具 (dev) - 仅 dev 版本
+# 安装开发工具 dev（仅 dev 版本）
 RUN if [ "$BUILD_TYPE" = "dev" ]; then \
         echo "=== Installing dev tools ===" && \
-        if [ -f "pyproject.toml" ]; then \
-            pip install --no-cache-dir .[dev] || \
-            pip install --no-cache-dir pytest black flake8 ruff; \
-        else \
-            pip install --no-cache-dir pytest black flake8 ruff; \
-        fi \
+        pip install --no-cache-dir .[dev]; \
     fi
 
-# 返回上层目录进行插件处理
+# 回到上级目录
 WORKDIR /app
 
-# 第4层：下载 OPK 插件 - 仅 full 版本
+# 下载 OPK 插件（仅 full 版本）
 RUN if [ "$BUILD_TYPE" = "full" ]; then \
         echo "=== Downloading OPK plugins ===" && \
         COPY opk.txt download_plugins.py ./ ; \
@@ -86,7 +63,7 @@ RUN if [ "$BUILD_TYPE" = "full" ]; then \
 
 # 清理不必要的文件，减小镜像体积
 RUN rm -rf /root/.cache/pip && \
-    # 清理 Python 缓存
+    # 清理 Python 包缓存
     find /usr/local/lib/python3.11 -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
     find /usr/local/lib/python3.11 -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true && \
     find /usr/local/lib/python3.11 -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true && \
@@ -97,9 +74,10 @@ RUN rm -rf /root/.cache/pip && \
     find /app/OlivOS -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true && \
     find /app/OlivOS -type f -name '*.pyc' -delete 2>/dev/null || true && \
     find /app/OlivOS -type f -name '*.pyo' -delete 2>/dev/null || true && \
-    # 清理文档和示例文件
+    # 清理文档文件
     find /app/OlivOS -type f -name '*.md' -delete 2>/dev/null || true && \
-    find /app/OlivOS -type f -name '*.rst' -delete 2>/dev/null || true
+    find /app/OlivOS -type f -name '*.rst' -delete 2>/dev/null || true && \
+    find /app/OlivOS -type f -name '*.txt' ! -name 'requirements.txt' -delete 2>/dev/null || true
 
 # ==================== 运行阶段 ====================
 FROM python:3.11-slim
