@@ -1,6 +1,6 @@
 # OlivOS Docker
 
-自动构建 [OlivOS](https://github.com/OlivOS-Team/OlivOS) 的多架构 Docker 镜像，每 12 小时检测新版本并自动触发构建。
+自动构建上游项目 [OlivOS](https://github.com/OlivOS-Team/OlivOS) 的多架构 Docker 镜像，每 12 小时检测新版本并自动触发构建。
 
 ## 支持架构
 
