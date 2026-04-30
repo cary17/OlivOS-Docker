@@ -27,6 +27,7 @@ docker compose up -d
 
 
 脚本运行安装
+
 国外
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/cary17/OlivOS-Docker/main/OlivOS.sh)"
