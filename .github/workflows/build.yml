@@ -85,6 +85,14 @@ jobs:
       packages: write
       attestations: write
       id-token: write
+    strategy:
+      matrix:
+        build_type: [full, dev]
+        include:
+          - build_type: full
+            suffix: ""
+          - build_type: dev
+            suffix: "-dev"
 
     steps:
       - name: Checkout
@@ -93,8 +101,9 @@ jobs:
       - name: Set environment variables
         run: |
           echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER@L}" >> $GITHUB_ENV
-          echo "DOCKER_TAG=${{ needs.check.outputs.docker_tag }}" >> $GITHUB_ENV
+          echo "DOCKER_TAG=${{ needs.check.outputs.docker_tag }}${{ matrix.suffix }}" >> $GITHUB_ENV
           echo "RAW_VERSION=${{ needs.check.outputs.raw_version }}" >> $GITHUB_ENV
+          echo "BUILD_TYPE=${{ matrix.build_type }}" >> $GITHUB_ENV
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -122,12 +131,16 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: OLIVOS_RAW_VERSION=${{ env.RAW_VERSION }}
+          build-args: |
+            OLIVOS_RAW_VERSION=${{ env.RAW_VERSION }}
+            BUILD_TYPE=${{ env.BUILD_TYPE }}
           tags: |
             ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:${{ env.DOCKER_TAG }}
-            ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:latest
+            ${{ matrix.build_type == 'full' && format('ghcr.io/{0}/olivos:latest', env.REPO_OWNER_LC) || '' }}
+            ${{ matrix.build_type == 'dev' && format('ghcr.io/{0}/olivos:latest-dev', env.REPO_OWNER_LC) || '' }}
             ${{ needs.check.outputs.dockerhub_enabled == 'true' && format('{0}/olivos:{1}', secrets.DOCKERHUB_USERNAME, env.DOCKER_TAG) || '' }}
-            ${{ needs.check.outputs.dockerhub_enabled == 'true' && format('{0}/olivos:latest', secrets.DOCKERHUB_USERNAME) || '' }}
+            ${{ needs.check.outputs.dockerhub_enabled == 'true' && matrix.build_type == 'full' && format('{0}/olivos:latest', secrets.DOCKERHUB_USERNAME) || '' }}
+            ${{ needs.check.outputs.dockerhub_enabled == 'true' && matrix.build_type == 'dev' && format('{0}/olivos:latest-dev', secrets.DOCKERHUB_USERNAME) || '' }}
           provenance: false
           sbom: false
 
