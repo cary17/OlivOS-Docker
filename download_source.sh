@@ -15,4 +15,16 @@ tar -xzf src.tar.gz
 mv "OlivOS-${RAW_VERSION}" OlivOS
 rm src.tar.gz
 
+# 复制 pyproject.toml 到根目录（方便 Dockerfile 引用）
+if [ -f "OlivOS/pyproject.toml" ]; then
+    cp OlivOS/pyproject.toml ./
+    echo "Copied pyproject.toml to root directory"
+fi
+
+# 复制 requirements.txt 到根目录（如果存在）
+if [ -f "OlivOS/requirements.txt" ]; then
+    cp OlivOS/requirements.txt ./
+    echo "Copied requirements.txt to root directory"
+fi
+
 echo "Successfully extracted to OlivOS/"
