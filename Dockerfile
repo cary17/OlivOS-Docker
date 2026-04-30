@@ -22,48 +22,54 @@ RUN chmod +x download_source.sh && \
     ./download_source.sh "${OLIVOS_RAW_VERSION}" && \
     rm download_source.sh
 
-# 复制 pyproject.toml 和 requirements.txt（作为备用）
-COPY pyproject.toml* requirements.txt* ./
+# 复制依赖配置文件
+COPY pyproject.toml requirements.txt ./
 
-# 安装 Python 依赖 - 优先使用 pyproject.toml
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    if [ -f "pyproject.toml" ]; then \
-        echo "Installing from pyproject.toml..."; \
-        case "$BUILD_TYPE" in \
-            dev) \
-                echo "Dev build: installing core + extend + dev dependencies..."; \
-                pip install --no-cache-dir ./OlivOS[extend,dev] || \
-                (pip install --no-cache-dir ./OlivOS && \
-                 pip install --no-cache-dir "lxml" "pyyaml" "openpyxl" "APScheduler==3.10.1" "js2py" "certifi" "httpx" "prompt-toolkit" "regex" "rich" && \
-                 pip install --no-cache-dir "pytest" "black" "flake8" "ruff"); \
-                ;; \
-            core) \
-                echo "Core build: installing core + extend dependencies (no OPK plugins)..."; \
-                pip install --no-cache-dir ./OlivOS[extend] || \
-                (pip install --no-cache-dir ./OlivOS && \
-                 pip install --no-cache-dir "lxml" "pyyaml" "openpyxl" "APScheduler==3.10.1" "js2py" "certifi" "httpx" "prompt-toolkit" "regex" "rich"); \
-                ;; \
-            *) \
-                echo "Full build: installing core + extend dependencies..."; \
-                pip install --no-cache-dir ./OlivOS[extend] || \
-                (pip install --no-cache-dir ./OlivOS && \
-                 pip install --no-cache-dir "lxml" "pyyaml" "openpyxl" "APScheduler==3.10.1" "js2py" "certifi" "httpx" "prompt-toolkit" "regex" "rich"); \
-                ;; \
-        esac; \
+# 升级 pip 和安装构建工具
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# ============================================
+# 安装 Python 依赖（分层安装，优化缓存）
+# ============================================
+
+# 第1层：优先使用 pyproject.toml 安装核心依赖
+RUN if [ -f "pyproject.toml" ]; then \
+        echo "=== Installing from pyproject.toml ===" && \
+        cd OlivOS && \
+        pip install --no-cache-dir .; \
     elif [ -f "requirements.txt" ]; then \
-        echo "pyproject.toml not found, using requirements.txt..."; \
-        pip install --no-cache-dir -r requirements.txt; \
-        if [ "$BUILD_TYPE" = "dev" ]; then \
-            echo "Dev build: installing dev tools..."; \
-            pip install --no-cache-dir "pytest" "black" "flake8" "ruff"; \
-        fi; \
+        echo "=== pyproject.toml not found, using requirements.txt ===" && \
+        # 提取核心依赖（排除注释和开发工具）
+        grep -v "^#" requirements.txt | grep -v "^$" | grep -v "^pytest" | grep -v "^black" | grep -v "^flake8" | grep -v "^ruff" | xargs pip install --no-cache-dir; \
     else \
-        echo "ERROR: No pyproject.toml or requirements.txt found!" && exit 1; \
+        echo "ERROR: No dependency file found!" && exit 1; \
     fi
 
-# 仅在 full 模式下下载和安装 OPK 插件
+# 第2层：安装插件生态依赖 (extend) - 所有版本都需要
+RUN if [ -f "pyproject.toml" ]; then \
+        echo "=== Installing extend dependencies ===" && \
+        cd OlivOS && \
+        pip install --no-cache-dir .[extend] || \
+        pip install --no-cache-dir lxml pyyaml openpyxl APScheduler==3.10.1 js2py certifi httpx "prompt-toolkit" regex rich; \
+    else \
+        echo "=== Installing extend dependencies from requirements.txt ===" && \
+        pip install --no-cache-dir lxml pyyaml openpyxl APScheduler==3.10.1 js2py certifi httpx "prompt-toolkit" regex rich; \
+    fi
+
+# 第3层：安装开发工具 (dev) - 仅 dev 版本
+RUN if [ "$BUILD_TYPE" = "dev" ]; then \
+        echo "=== Installing dev tools ===" && \
+        if [ -f "pyproject.toml" ]; then \
+            cd OlivOS && pip install --no-cache-dir .[dev] || \
+            pip install --no-cache-dir pytest black flake8 ruff; \
+        else \
+            pip install --no-cache-dir pytest black flake8 ruff; \
+        fi \
+    fi
+
+# 第4层：下载 OPK 插件 - 仅 full 版本
 RUN if [ "$BUILD_TYPE" = "full" ]; then \
-        echo "Full build: downloading OPK plugins..."; \
+        echo "=== Downloading OPK plugins ===" && \
         COPY opk.txt download_plugins.py ./ ; \
         python download_plugins.py && \
         rm download_plugins.py opk.txt; \
@@ -71,36 +77,39 @@ RUN if [ "$BUILD_TYPE" = "full" ]; then \
         COPY opk/ ./opk_local/ 2>/dev/null || true; \
         find ./opk_local -name '*.opk' -exec cp {} OlivOS/plugin/app/ \; 2>/dev/null || true; \
         rm -rf ./opk_local; \
-    else \
-        echo "$BUILD_TYPE build: skipping OPK plugins installation"; \
     fi
 
-# 清理：删除缓存、__pycache__、tests、test 目录
+# 清理不必要的文件，减小镜像体积
 RUN rm -rf /root/.cache/pip && \
+    # 清理 Python 缓存
     find /usr/local/lib/python3.11 -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
     find /usr/local/lib/python3.11 -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true && \
     find /usr/local/lib/python3.11 -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true && \
-    # 清理源码中不必要的文件
+    # 清理源码中的缓存和测试文件
     find /app/OlivOS -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
     find /app/OlivOS -type d -name '.git' -exec rm -rf {} + 2>/dev/null || true && \
+    find /app/OlivOS -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true && \
+    find /app/OlivOS -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true && \
     find /app/OlivOS -type f -name '*.pyc' -delete 2>/dev/null || true && \
-    find /app/OlivOS -type f -name '*.pyo' -delete 2>/dev/null || true
+    find /app/OlivOS -type f -name '*.pyo' -delete 2>/dev/null || true && \
+    # 清理文档和示例文件
+    find /app/OlivOS -type f -name '*.md' -delete 2>/dev/null || true && \
+    find /app/OlivOS -type f -name '*.rst' -delete 2>/dev/null || true
 
 # ==================== 运行阶段 ====================
 FROM python:3.11-slim
 
 ARG BUILD_TYPE=full
 
-# 安装运行时依赖
+# 安装运行时依赖（开发版额外安装调试工具）
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
-        # 开发版额外安装调试工具
-        $(if [ "$BUILD_TYPE" = "dev" ]; then echo "vim curl procps"; fi) \
+        $(if [ "$BUILD_TYPE" = "dev" ]; then echo "vim curl procps htop"; fi) \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# 复制 site-packages
+# 复制已安装的 Python 包
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 
 # 复制源码
@@ -109,6 +118,7 @@ COPY --from=builder /app/OlivOS /app/OlivOS
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV PIP_NO_CACHE_DIR=1
 
 # 入口点
 COPY entrypoint.sh /entrypoint.sh
