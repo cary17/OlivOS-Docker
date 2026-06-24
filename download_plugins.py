@@ -3,8 +3,10 @@ import json
 import os
 import urllib.request
 
-PLUGIN_DIR = "OlivOS/plugin/app"
+PLUGIN_DIR = os.environ.get("PLUGIN_DIR", "OlivOS/plugin/app")
+MANIFEST_PATH = os.environ.get("PLUGIN_MANIFEST", "downloaded-plugins.json")
 os.makedirs(PLUGIN_DIR, exist_ok=True)
+manifest = []
 
 with open("opk.txt", encoding="utf-8") as f:
     for line in f:
@@ -24,6 +26,18 @@ with open("opk.txt", encoding="utf-8") as f:
                 dest = os.path.join(PLUGIN_DIR, name)
                 print(f"Downloading {name} ← {asset['browser_download_url']}")
                 urllib.request.urlretrieve(asset["browser_download_url"], dest)
+                manifest.append(
+                    {
+                        "name": name,
+                        "repo": repo,
+                        "version": data.get("tag_name") or data.get("name") or "",
+                        "asset": asset["name"],
+                    }
+                )
                 break
         else:
             print(f"WARNING: No .opk asset found for {name}")
+
+with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
+    json.dump(manifest, f, ensure_ascii=False, indent=2)
+    f.write("\n")

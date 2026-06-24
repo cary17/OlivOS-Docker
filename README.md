@@ -13,6 +13,13 @@
 - Docker Hub: `cary17/olivos`
 - GHCR: `ghcr.io/cary17/olivos`
 
+## 镜像标签
+
+- 正式版：`latest`、`latest-core`、`latest-dev`、`v版本号`
+- 测试版：`testing`、`testing-core`、`testing-dev`、`v测试版本号`
+
+`latest` 系列标签只指向正式版。Pre-release 只会更新具体版本号标签和 `testing` 系列标签。
+
 ## 使用方法
 
 ```bash

@@ -2,7 +2,8 @@
 FROM python:3.11-slim AS builder
 
 ARG OLIVOS_RAW_VERSION
-ARG BUILD_TYPE=full  # full, core, dev
+# full, core, dev
+ARG BUILD_TYPE=full
 
 # 安装编译依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -49,15 +50,20 @@ RUN if [ "$BUILD_TYPE" = "dev" ]; then \
 # 回到上级目录
 WORKDIR /app
 
+COPY opk.txt download_plugins.py ./
+COPY opk/ ./opk_local/
+
 # 下载 OPK 插件（仅 full 版本）
 RUN if [ "$BUILD_TYPE" = "full" ]; then \
         echo "=== Downloading OPK plugins ===" && \
-        COPY opk.txt download_plugins.py ./ ; \
         python download_plugins.py && \
-        rm download_plugins.py opk.txt; \
-        # 复制本地 opk 文件夹中的插件
-        COPY opk/ ./opk_local/ 2>/dev/null || true; \
-        find ./opk_local -name '*.opk' -exec cp {} OlivOS/plugin/app/ \; 2>/dev/null || true; \
+        rm download_plugins.py opk.txt && \
+        if [ -d ./opk_local ]; then \
+            find ./opk_local -name '*.opk' -exec cp {} OlivOS/plugin/app/ \; ; \
+        fi; \
+        rm -rf ./opk_local; \
+    else \
+        rm -f download_plugins.py opk.txt && \
         rm -rf ./opk_local; \
     fi
 
