@@ -55,26 +55,57 @@ is_installed() {
     fi
 }
 
-has_any_account() {
-    if [ -f "/opt/olivos/conf/account.json" ]; then
-        local count=$(python3 -c "
-import json
-with open('/opt/olivos/conf/account.json') as f:
-    data = json.load(f)
-print(len(data.get('account', [])))
-" 2>/dev/null || echo "0")
-        [ "$count" -gt 0 ] && return 0 || return 1
-    else
-        return 1
-    fi
-}
-
 require_installed() {
     if ! is_installed; then
         print_warning "尚未安装 OlivOS，请先添加账号完成安装。"
         return 1
     fi
     return 0
+}
+
+mask_secret() {
+    local secret="$1"
+    if [ ${#secret} -le 8 ]; then
+        echo "****"
+    else
+        echo "${secret:0:4}****${secret: -4}"
+    fi
+}
+
+container_running() {
+    local name="$1"
+    [ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || echo false)" = "true" ]
+}
+
+write_docker_daemon_config() {
+    local mirror="$1"
+    local daemon_file="/etc/docker/daemon.json"
+
+    if [ -f "$daemon_file" ]; then
+        cp "$daemon_file" "${daemon_file}.bak.$(date +%Y%m%d%H%M%S)"
+    fi
+
+    MIRROR="$mirror" python3 << 'EOF'
+import json
+import os
+from pathlib import Path
+
+daemon_file = Path("/etc/docker/daemon.json")
+try:
+    data = json.loads(daemon_file.read_text(encoding="utf-8")) if daemon_file.exists() else {}
+except json.JSONDecodeError:
+    data = {}
+
+mirror = os.environ.get("MIRROR", "")
+if mirror:
+    data["registry-mirrors"] = [mirror]
+else:
+    data.pop("registry-mirrors", None)
+
+data["log-driver"] = "json-file"
+data["log-opts"] = {"max-size": "10m", "max-file": "3"}
+daemon_file.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+EOF
 }
 
 # ==================== 环境检测和安装（延迟执行）====================
@@ -88,10 +119,10 @@ ensure_environment() {
     # 安装基础工具
     print_info "安装基础工具..."
     if command -v apt &> /dev/null; then
-        apt update -y && apt upgrade -y
+        apt update -y
         apt install -y vnstat curl nftables bc python3
     elif command -v yum &> /dev/null; then
-        yum update -y && yum install -y vnstat curl nftables bc python3
+        yum install -y vnstat curl nftables bc python3
     fi
     print_success "基础工具安装完成。"
 
@@ -135,21 +166,10 @@ ensure_environment() {
     print_info "阿里云镜像: ${aliyun_time}s, Docker Hub: ${dockerhub_time}s"
 
     if (( $(echo "$aliyun_time < 3" | bc -l) )) && (( $(echo "$aliyun_time < $dockerhub_time" | bc -l) )); then
-        cat > /etc/docker/daemon.json << EOF
-{
-  "registry-mirrors": ["https://registry.cn-hangzhou.aliyuncs.com"],
-  "log-driver": "json-file",
-  "log-opts": { "max-size": "10m", "max-file": "3" }
-}
-EOF
+        write_docker_daemon_config "https://registry.cn-hangzhou.aliyuncs.com"
         print_success "使用阿里云镜像加速"
     else
-        cat > /etc/docker/daemon.json << EOF
-{
-  "log-driver": "json-file",
-  "log-opts": { "max-size": "10m", "max-file": "3" }
-}
-EOF
+        write_docker_daemon_config ""
         print_info "Docker Hub 连接正常，跳过镜像加速"
     fi
 
@@ -216,15 +236,25 @@ select_image_version() {
     esac
 
     echo ""
-    read -p "指定具体版本？(例: 0.11.81，留空使用 latest): " specified_version
+    echo "发布通道："
+    echo -e "  ${GREEN}1) stable  (正式版，latest)${NC}"
+    echo -e "  ${YELLOW}2) testing (测试版，Pre-release)${NC}"
+    read -p "请选择发布通道 [1/2] (默认:1): " channel_choice
+    case "$channel_choice" in
+        2) channel_tag="testing" ;;
+        *) channel_tag="latest" ;;
+    esac
+
+    echo ""
+    read -p "指定具体版本？(例: 0.11.81，留空使用 ${channel_tag}): " specified_version
     specified_version=$(echo "$specified_version" | sed 's/^v//')
 
     if [ -n "$specified_version" ]; then
         IMAGE_TAG="v${specified_version}"
         [ "$BUILD_TYPE" != "full" ] && IMAGE_TAG="${IMAGE_TAG}-${BUILD_TYPE}"
     else
-        IMAGE_TAG="latest"
-        [ "$BUILD_TYPE" != "full" ] && IMAGE_TAG="latest-${BUILD_TYPE}"
+        IMAGE_TAG="$channel_tag"
+        [ "$BUILD_TYPE" != "full" ] && IMAGE_TAG="${IMAGE_TAG}-${BUILD_TYPE}"
     fi
 
     print_success "镜像: ${IMAGE_BASE}:${IMAGE_TAG}"
@@ -290,8 +320,8 @@ print(count)
     local webui_port=$((6099 + existing_count))
 
     read -p "请输入 QQ 号: " qq_id
-    if [ -z "$qq_id" ]; then
-        print_error "QQ 号不能为空！"
+    if [[ ! "$qq_id" =~ ^[0-9]+$ ]]; then
+        print_error "QQ 号必须是纯数字！"
         return 1
     fi
 
@@ -304,12 +334,20 @@ print(count)
 
     read -p "Onebot HTTP 端口 [默认:3000]: " http_port
     http_port=${http_port:-3000}
+    if [[ ! "$http_port" =~ ^[0-9]+$ ]] || [ "$http_port" -lt 1 ] || [ "$http_port" -gt 65535 ]; then
+        print_error "端口必须是 1-65535 的数字！"
+        return 1
+    fi
 
     for config in /opt/napcat/config/onebot11_*.json; do
         [ -f "$config" ] || continue
         local ep=$(python3 -c "import json;print(json.load(open('$config'))['network']['httpServers'][0]['port'])" 2>/dev/null)
         if [ "$ep" = "$http_port" ]; then
             http_port=$((ep + 1))
+            if [ "$http_port" -gt 65535 ]; then
+                print_error "没有可自动分配的端口！"
+                return 1
+            fi
             print_warning "端口被占用，自动分配: $http_port"
         fi
     done
@@ -320,59 +358,71 @@ print(count)
         print_info "已生成 Token: $access_token"
     fi
 
-    cat > "/opt/napcat/config/onebot11_${qq_id}.json" << EOF
-{
-  "network": {
-    "httpServers": [
-      {
-        "enable": true,
-        "name": "olivos",
-        "host": "0.0.0.0",
-        "port": $http_port,
-        "enableCors": true,
-        "enableWebsocket": false,
-        "messagePostFormat": "array",
-        "token": "$access_token",
-        "debug": false
-      }
-    ],
-    "httpSseServers": [],
-    "httpClients": [
-      {
-        "enable": true,
-        "name": "OlivOSMsgApi",
-        "url": "http://olivos:55001/OlivOSMsgApi/qq/onebot/default",
-        "reportSelfMessage": false,
-        "messagePostFormat": "array",
-        "token": "",
-        "debug": false
-      }
-    ],
-    "websocketServers": [],
-    "websocketClients": [],
-    "plugins": []
-  },
-  "musicSignUrl": "",
-  "enableLocalFile2Url": false,
-  "parseMultMsg": false,
-  "imageDownloadProxy": "",
-  "timeout": {
-    "baseTimeout": 10000,
-    "uploadSpeedKBps": 256,
-    "downloadSpeedKBps": 256,
-    "maxTimeout": 1800000
-  }
+    QQ_ID="$qq_id" HTTP_PORT="$http_port" ACCESS_TOKEN="$access_token" python3 << 'EOF'
+import json
+import os
+from pathlib import Path
+
+qq_id = os.environ["QQ_ID"]
+http_port = int(os.environ["HTTP_PORT"])
+access_token = os.environ["ACCESS_TOKEN"]
+config = {
+    "network": {
+        "httpServers": [
+            {
+                "enable": True,
+                "name": "olivos",
+                "host": "0.0.0.0",
+                "port": http_port,
+                "enableCors": True,
+                "enableWebsocket": False,
+                "messagePostFormat": "array",
+                "token": access_token,
+                "debug": False,
+            }
+        ],
+        "httpSseServers": [],
+        "httpClients": [
+            {
+                "enable": True,
+                "name": "OlivOSMsgApi",
+                "url": "http://olivos:55001/OlivOSMsgApi/qq/onebot/default",
+                "reportSelfMessage": False,
+                "messagePostFormat": "array",
+                "token": "",
+                "debug": False,
+            }
+        ],
+        "websocketServers": [],
+        "websocketClients": [],
+        "plugins": [],
+    },
+    "musicSignUrl": "",
+    "enableLocalFile2Url": False,
+    "parseMultMsg": False,
+    "imageDownloadProxy": "",
+    "timeout": {
+        "baseTimeout": 10000,
+        "uploadSpeedKBps": 256,
+        "downloadSpeedKBps": 256,
+        "maxTimeout": 1800000,
+    },
 }
+Path(f"/opt/napcat/config/onebot11_{qq_id}.json").write_text(
+    json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+)
 EOF
 
     print_success "NapCat 配置已创建: onebot11_${qq_id}.json"
 
     local accounts=$(read_accounts)
-    local new_accounts=$(python3 << EOF
+    local new_accounts=$(ACCOUNT_JSON="$accounts" QQ_ID="$qq_id" HTTP_PORT="$http_port" ACCESS_TOKEN="$access_token" python3 << 'EOF'
 import json
-accounts = json.loads('''$accounts''')
+import os
+
+accounts = json.loads(os.environ["ACCOUNT_JSON"])
 new_account = {
-    "id": $qq_id,
+    "id": int(os.environ["QQ_ID"]),
     "password": "",
     "sdk_type": "onebot",
     "platform_type": "qq",
@@ -381,8 +431,8 @@ new_account = {
         "auto": False,
         "type": "post",
         "host": "http://napcat",
-        "port": $http_port,
-        "access_token": "$access_token"
+        "port": int(os.environ["HTTP_PORT"]),
+        "access_token": os.environ["ACCESS_TOKEN"]
     },
     "extends": {},
     "debug": False
@@ -403,7 +453,7 @@ EOF
     print_success "QQ $qq_id 添加完成！"
     print_info "  WebUI 端口: ${webui_port}"
     print_info "  HTTP 端口: $http_port"
-    print_info "  Access Token: $access_token"
+    print_info "  Access Token: $(mask_secret "$access_token")"
 }
 
 add_other_platform_account() {
@@ -516,27 +566,37 @@ add_account_json() {
     local model_type="$5" server_auto="$6" server_type="$7"
     local server_host="$8" server_port="$9" access_token="${10}"
 
+    if [ -n "$server_port" ] && ! [[ "$server_port" =~ ^[0-9]+$ ]]; then
+        print_error "端口必须是数字！"
+        return 1
+    fi
+
     local accounts=$(read_accounts)
-    local new_accounts=$(python3 << EOF
+    local new_accounts=$(ACCOUNT_JSON="$accounts" ACCOUNT_ID="$id" PASSWORD="$password" SDK_TYPE="$sdk_type" PLATFORM_TYPE="$platform_type" MODEL_TYPE="$model_type" SERVER_AUTO="$server_auto" SERVER_TYPE="$server_type" SERVER_HOST="$server_host" SERVER_PORT="$server_port" ACCESS_TOKEN="$access_token" python3 << 'EOF'
 import json
-accounts = json.loads('''$accounts''')
+import os
+
+accounts = json.loads(os.environ["ACCOUNT_JSON"])
+raw_id = os.environ["ACCOUNT_ID"]
 try:
-    account_id = int($id)
-except:
-    account_id = "$id"
+    account_id = int(raw_id)
+except ValueError:
+    account_id = raw_id
+
+server_port = os.environ["SERVER_PORT"]
 
 new_account = {
     "id": account_id,
-    "password": "$password",
-    "sdk_type": "$sdk_type",
-    "platform_type": "$platform_type",
-    "model_type": "$model_type",
+    "password": os.environ["PASSWORD"],
+    "sdk_type": os.environ["SDK_TYPE"],
+    "platform_type": os.environ["PLATFORM_TYPE"],
+    "model_type": os.environ["MODEL_TYPE"],
     "server": {
-        "auto": $([ "$server_auto" = "true" ] && echo "True" || echo "False"),
-        "type": "$server_type",
-        "host": "$server_host",
-        "port": $([ -n "$server_port" ] && echo "$server_port" || echo "0"),
-        "access_token": "$access_token"
+        "auto": os.environ["SERVER_AUTO"] == "true",
+        "type": os.environ["SERVER_TYPE"],
+        "host": os.environ["SERVER_HOST"],
+        "port": int(server_port) if server_port else 0,
+        "access_token": os.environ["ACCESS_TOKEN"]
     },
     "extends": {},
     "debug": False
@@ -589,13 +649,18 @@ remove_account() {
     fi
 
     read -p "请输入要删除的账号索引: " index
+    if [[ ! "$index" =~ ^[0-9]+$ ]]; then
+        print_error "索引必须是数字！"
+        return 1
+    fi
 
     local accounts=$(read_accounts)
-    local result=$(python3 << EOF
+    local result=$(ACCOUNT_JSON="$accounts" REMOVE_INDEX="$index" python3 << 'EOF'
 import json, os
-accounts = json.loads('''$accounts''')
-if 0 <= $index < len(accounts['account']):
-    removed = accounts['account'].pop($index)
+accounts = json.loads(os.environ["ACCOUNT_JSON"])
+index = int(os.environ["REMOVE_INDEX"])
+if 0 <= index < len(accounts['account']):
+    removed = accounts['account'].pop(index)
     if removed.get('platform_type') == 'qq' and removed.get('sdk_type') == 'onebot':
         cf = f'/opt/napcat/config/onebot11_{removed["id"]}.json'
         if os.path.exists(cf):
@@ -632,6 +697,8 @@ generate_napcat_compose() {
     fi
 
     print_info "生成 NapCat compose 配置..."
+    NAPCAT_UID=${NAPCAT_UID:-$(id -u)}
+    NAPCAT_GID=${NAPCAT_GID:-$(id -g)}
     
     local napcat_ports=""
     local configs=$(ls /opt/napcat/config/onebot11_*.json 2>/dev/null || true)
@@ -890,7 +957,7 @@ start_services() {
     docker compose up -d
     sleep 3
 
-    if docker ps --format '{{.Names}}' | grep -q "olivos"; then
+    if container_running olivos; then
         print_success "OlivOS 已成功启动"
     else
         print_error "OlivOS 启动失败！查看日志："
@@ -898,7 +965,7 @@ start_services() {
     fi
 
     if [ "$(has_qq_accounts)" = "true" ]; then
-        if docker ps --format '{{.Names}}' | grep -q "napcat"; then
+        if container_running napcat; then
             print_success "NapCat 已成功启动"
             
             local webui_token=$(get_napcat_webui_token)
@@ -962,13 +1029,16 @@ update_images() {
     fi
     
     print_info "拉取最新 OlivOS 镜像..."
-    docker pull "${IMAGE_BASE}:${IMAGE_TAG}" || print_warning "OlivOS 更新失败"
+    docker pull "${IMAGE_BASE}:${IMAGE_TAG}" || {
+        print_error "OlivOS 更新失败，已停止后续清理和重启操作。"
+        return 1
+    }
     
     print_info "清理旧版本镜像..."
     if [ -n "$old_images" ]; then
         echo "$old_images" | while read -r old_img; do
             local tag=$(echo "$old_img" | cut -d: -f2)
-            if [[ "$tag" != "latest" && "$tag" != "latest-core" && "$tag" != "latest-dev" ]]; then
+            if [[ "$tag" != "latest" && "$tag" != "latest-core" && "$tag" != "latest-dev" && "$tag" != "testing" && "$tag" != "testing-core" && "$tag" != "testing-dev" ]]; then
                 docker rmi "$old_img" 2>/dev/null && print_success "已删除镜像: $old_img" || true
             fi
         done
@@ -987,7 +1057,7 @@ update_images() {
 show_logs() {
     require_installed || return 1
     
-    if [ "$(has_qq_accounts)" = "true" ] && docker ps --format '{{.Names}}' | grep -q "napcat"; then
+    if [ "$(has_qq_accounts)" = "true" ] && container_running napcat; then
         print_header "NapCat 日志（最后 40 行）"
         docker logs napcat 2>&1 | tail -40
         
