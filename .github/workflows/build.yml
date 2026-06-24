@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       force_build:
-        description: 'Force build even if image exists'
+        description: 'Force build stable and testing releases without updating build-record.json'
         required: false
         type: boolean
         default: false
@@ -15,7 +15,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   attestations: write
   id-token: write
@@ -24,244 +24,230 @@ jobs:
   check:
     runs-on: ubuntu-latest
     outputs:
-      raw_version: ${{ steps.version.outputs.raw_version }}
-      docker_tag: ${{ steps.version.outputs.docker_tag }}
-      skip: ${{ steps.check.outputs.skip }}
+      stable_raw_version: ${{ steps.release.outputs.stable_raw_version }}
+      stable_docker_tag: ${{ steps.release.outputs.stable_docker_tag }}
+      stable_should_build: ${{ steps.release.outputs.stable_should_build }}
+      testing_raw_version: ${{ steps.release.outputs.testing_raw_version }}
+      testing_docker_tag: ${{ steps.release.outputs.testing_docker_tag }}
+      testing_should_build: ${{ steps.release.outputs.testing_should_build }}
+      any_should_build: ${{ steps.release.outputs.any_should_build }}
       dockerhub_enabled: ${{ steps.dockerhub_check.outputs.enabled }}
+      force_build: ${{ steps.force.outputs.enabled }}
 
     steps:
-      - name: Get latest OlivOS release version
-        id: version
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve force build flag
+        id: force
         run: |
-          RAW=$(curl -sf \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            https://api.github.com/repos/OlivOS-Team/OlivOS/releases/latest \
-            | jq -r '.tag_name')
-          if [ -z "$RAW" ] || [ "$RAW" = "null" ]; then
-            echo "Failed to get version" && exit 1
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force_build }}" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "raw_version=$RAW" >> $GITHUB_OUTPUT
-          echo "docker_tag=v$RAW" >> $GITHUB_OUTPUT
-          echo "Detected raw version: $RAW, Docker tag will be: v$RAW"
+
+      - name: Detect latest OlivOS releases
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FORCE_ARG=""
+          if [ "${{ steps.force.outputs.enabled }}" = "true" ]; then
+            FORCE_ARG="--force"
+          fi
+          python3 scripts/build_metadata.py detect --record build-record.json $FORCE_ARG
 
       - name: Check Docker Hub secrets
         id: dockerhub_check
         run: |
           if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
-            echo "enabled=true" >> $GITHUB_OUTPUT
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
             echo "Docker Hub is enabled"
           else
-            echo "enabled=false" >> $GITHUB_OUTPUT
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "Docker Hub is disabled (secrets not found)"
           fi
 
-      - name: Login to GHCR for check
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GHCR_PAT }}
+  build:
+    runs-on: ubuntu-latest
+    needs: check
+    if: needs.check.outputs.any_should_build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [stable, testing]
+        build_type: [core, dev, full]
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
 
-      - name: Check if image already exists on GHCR
-        id: check
+    steps:
+      - name: Check channel build requirement
+        id: channel
+        run: |
+          if [ "${{ matrix.channel }}" = "stable" ]; then
+            SHOULD_BUILD="${{ needs.check.outputs.stable_should_build }}"
+          else
+            SHOULD_BUILD="${{ needs.check.outputs.testing_should_build }}"
+          fi
+          echo "should_build=${SHOULD_BUILD}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: steps.channel.outputs.should_build == 'true'
+        uses: actions/checkout@v4
+
+      - name: Prepare build metadata
+        if: steps.channel.outputs.should_build == 'true'
+        id: meta
+        env:
+          DOCKERHUB_ENABLED: ${{ needs.check.outputs.dockerhub_enabled }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           REPO_OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          DOCKER_TAG=${{ steps.version.outputs.docker_tag }}
-          if docker manifest inspect ghcr.io/${REPO_OWNER_LC}/olivos:${DOCKER_TAG} > /dev/null 2>&1 \
-            && [ "${{ inputs.force_build }}" != "true" ]; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-            echo "Image ${DOCKER_TAG} already exists on GHCR, skipping build."
+          if [ "${{ matrix.channel }}" = "stable" ]; then
+            RAW_VERSION="${{ needs.check.outputs.stable_raw_version }}"
+            BASE_TAG="${{ needs.check.outputs.stable_docker_tag }}"
+            MOVING_TAG="latest"
           else
-            echo "skip=false" >> $GITHUB_OUTPUT
-            echo "Image ${DOCKER_TAG} not found on GHCR, will build."
+            RAW_VERSION="${{ needs.check.outputs.testing_raw_version }}"
+            BASE_TAG="${{ needs.check.outputs.testing_docker_tag }}"
+            MOVING_TAG="testing"
           fi
 
-  build-core:
-    runs-on: ubuntu-latest
-    needs: check
-    if: needs.check.outputs.skip == 'false'
-    permissions:
-      contents: read
-      packages: write
-      attestations: write
-      id-token: write
+          case "${{ matrix.build_type }}" in
+            full)
+              VERSION_TAG="${BASE_TAG}"
+              CHANNEL_TAG="${MOVING_TAG}"
+              ;;
+            core)
+              VERSION_TAG="${BASE_TAG}-core"
+              CHANNEL_TAG="${MOVING_TAG}-core"
+              ;;
+            dev)
+              VERSION_TAG="${BASE_TAG}-dev"
+              CHANNEL_TAG="${MOVING_TAG}-dev"
+              ;;
+          esac
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set environment variables
-        run: |
-          echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER@L}" >> $GITHUB_ENV
-          echo "DOCKER_TAG=${{ needs.check.outputs.docker_tag }}-core" >> $GITHUB_ENV
-          echo "RAW_VERSION=${{ needs.check.outputs.raw_version }}" >> $GITHUB_ENV
-          echo "BUILD_TYPE=core" >> $GITHUB_ENV
+          echo "raw_version=${RAW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "build_type=${{ matrix.build_type }}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "ghcr.io/${REPO_OWNER_LC}/olivos:${VERSION_TAG}"
+            echo "ghcr.io/${REPO_OWNER_LC}/olivos:${CHANNEL_TAG}"
+            if [ "${DOCKERHUB_ENABLED}" = "true" ]; then
+              echo "${DOCKERHUB_USERNAME}/olivos:${VERSION_TAG}"
+              echo "${DOCKERHUB_USERNAME}/olivos:${CHANNEL_TAG}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Login to GHCR
+        if: steps.channel.outputs.should_build == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
-          password: ${{ secrets.GHCR_PAT }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login to Docker Hub
-        if: needs.check.outputs.dockerhub_enabled == 'true'
+        if: steps.channel.outputs.should_build == 'true' && needs.check.outputs.dockerhub_enabled == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set up QEMU
+        if: steps.channel.outputs.should_build == 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
+        if: steps.channel.outputs.should_build == 'true'
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push core image
+      - name: Build and push image
+        if: steps.channel.outputs.should_build == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            OLIVOS_RAW_VERSION=${{ env.RAW_VERSION }}
-            BUILD_TYPE=${{ env.BUILD_TYPE }}
-          tags: |
-            ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:${{ env.DOCKER_TAG }}
-            ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:latest-core
-            ${{ needs.check.outputs.dockerhub_enabled == 'true' && format('{0}/olivos:{1}', secrets.DOCKERHUB_USERNAME, env.DOCKER_TAG) || '' }}
-            ${{ needs.check.outputs.dockerhub_enabled == 'true' && format('{0}/olivos:latest-core', secrets.DOCKERHUB_USERNAME) || '' }}
-          provenance: false
-          sbom: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  build-dev:
-    runs-on: ubuntu-latest
-    needs: check
-    if: needs.check.outputs.skip == 'false'
-    permissions:
-      contents: read
-      packages: write
-      attestations: write
-      id-token: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set environment variables
-        run: |
-          echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER@L}" >> $GITHUB_ENV
-          echo "DOCKER_TAG=${{ needs.check.outputs.docker_tag }}-dev" >> $GITHUB_ENV
-          echo "RAW_VERSION=${{ needs.check.outputs.raw_version }}" >> $GITHUB_ENV
-          echo "BUILD_TYPE=dev" >> $GITHUB_ENV
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GHCR_PAT }}
-
-      - name: Login to Docker Hub
-        if: needs.check.outputs.dockerhub_enabled == 'true'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push dev image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          build-args: |
-            OLIVOS_RAW_VERSION=${{ env.RAW_VERSION }}
-            BUILD_TYPE=${{ env.BUILD_TYPE }}
-          tags: |
-            ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:${{ env.DOCKER_TAG }}
-            ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:latest-dev
-            ${{ needs.check.outputs.dockerhub_enabled == 'true' && format('{0}/olivos:{1}', secrets.DOCKERHUB_USERNAME, env.DOCKER_TAG) || '' }}
-            ${{ needs.check.outputs.dockerhub_enabled == 'true' && format('{0}/olivos:latest-dev', secrets.DOCKERHUB_USERNAME) || '' }}
-          provenance: false
-          sbom: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  build-full:
-    runs-on: ubuntu-latest
-    needs: [check, build-core, build-dev]
-    if: needs.check.outputs.skip == 'false'
-    permissions:
-      contents: read
-      packages: write
-      attestations: write
-      id-token: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set environment variables
-        run: |
-          echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER@L}" >> $GITHUB_ENV
-          echo "DOCKER_TAG=${{ needs.check.outputs.docker_tag }}" >> $GITHUB_ENV
-          echo "RAW_VERSION=${{ needs.check.outputs.raw_version }}" >> $GITHUB_ENV
-          echo "BUILD_TYPE=full" >> $GITHUB_ENV
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GHCR_PAT }}
-
-      - name: Login to Docker Hub
-        if: needs.check.outputs.dockerhub_enabled == 'true'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push full image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          build-args: |
-            OLIVOS_RAW_VERSION=${{ env.RAW_VERSION }}
-            BUILD_TYPE=${{ env.BUILD_TYPE }}
-          tags: |
-            ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:${{ env.DOCKER_TAG }}
-            ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:latest
-            ${{ needs.check.outputs.dockerhub_enabled == 'true' && format('{0}/olivos:{1}', secrets.DOCKERHUB_USERNAME, env.DOCKER_TAG) || '' }}
-            ${{ needs.check.outputs.dockerhub_enabled == 'true' && format('{0}/olivos:latest', secrets.DOCKERHUB_USERNAME) || '' }}
+            OLIVOS_RAW_VERSION=${{ steps.meta.outputs.raw_version }}
+            BUILD_TYPE=${{ steps.meta.outputs.build_type }}
+          tags: ${{ steps.meta.outputs.tags }}
           provenance: false
           sbom: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Verify multi-arch manifest
+        if: steps.channel.outputs.should_build == 'true'
         run: |
-          echo "Verifying GHCR manifest:"
-          docker buildx imagetools inspect ghcr.io/${{ env.REPO_OWNER_LC }}/olivos:${{ env.DOCKER_TAG }}
-          
-          if [ "${{ needs.check.outputs.dockerhub_enabled }}" = "true" ]; then
-            echo "Verifying Docker Hub manifest:"
-            docker buildx imagetools inspect ${{ secrets.DOCKERHUB_USERNAME }}/olivos:${{ env.DOCKER_TAG }}
+          TAGS='${{ steps.meta.outputs.tags }}'
+          printf '%s\n' "$TAGS" | while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            echo "Verifying manifest: $tag"
+            docker buildx imagetools inspect "$tag"
+          done
+
+  record:
+    runs-on: ubuntu-latest
+    needs: [check, build]
+    if: needs.check.outputs.any_should_build == 'true'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Collect OPK plugin versions
+        env:
+          PLUGIN_DIR: ${{ runner.temp }}/olivos-opk
+        run: |
+          python3 download_plugins.py
+
+      - name: Update local build record
+        run: |
+          FORCE_ARG=""
+          if [ "${{ needs.check.outputs.force_build }}" = "true" ]; then
+            FORCE_ARG="--force"
           fi
+
+          if [ "${{ needs.check.outputs.stable_should_build }}" = "true" ]; then
+            python3 scripts/build_metadata.py update-record \
+              --record build-record.json \
+              --channel stable \
+              --raw-version "${{ needs.check.outputs.stable_raw_version }}" \
+              --plugins downloaded-plugins.json \
+              $FORCE_ARG
+          fi
+
+          if [ "${{ needs.check.outputs.testing_should_build }}" = "true" ]; then
+            python3 scripts/build_metadata.py update-record \
+              --record build-record.json \
+              --channel testing \
+              --raw-version "${{ needs.check.outputs.testing_raw_version }}" \
+              --plugins downloaded-plugins.json \
+              $FORCE_ARG
+          fi
+
+      - name: Commit build record
+        if: needs.check.outputs.force_build != 'true'
+        run: |
+          if git diff --quiet -- build-record.json; then
+            echo "No build record changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build-record.json
+          git commit -m "chore: record OlivOS Docker build"
+          git pull --rebase
+          git push
