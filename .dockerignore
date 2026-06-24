@@ -1,0 +1,10 @@
+.git
+.github
+scripts
+tests
+__pycache__
+*.pyc
+
+README.md
+docker-compose.yml
+build-record.json
