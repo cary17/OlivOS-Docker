@@ -1,98 +1,14 @@
 {
   "stable": {
-    "olivos_version": "0.11.81",
-    "plugins": [
-      {
-        "asset": "OlivaDiceCore.opk",
-        "name": "OlivaDiceCore.opk",
-        "repo": "OlivOS-Team/OlivaDiceCore",
-        "version": "3.4.53"
-      },
-      {
-        "asset": "OlivaDiceLogger.opk",
-        "name": "OlivaDiceLogger.opk",
-        "repo": "OlivOS-Team/OlivaDiceLogger",
-        "version": "3.0.28"
-      },
-      {
-        "asset": "OlivaStoryCore.opk",
-        "name": "OlivaStoryCore.opk",
-        "repo": "OlivOS-Team/OlivaStoryCore",
-        "version": "3.0.5"
-      },
-      {
-        "asset": "OlivaDiceOdyssey.opk",
-        "name": "OlivaDiceOdyssey.opk",
-        "repo": "OlivOS-Team/OlivaDiceOdyssey",
-        "version": "3.0.15"
-      },
-      {
-        "asset": "OlivaDiceMaster.opk",
-        "name": "OlivaDiceMaster.opk",
-        "repo": "OlivOS-Team/OlivaDiceMaster",
-        "version": "3.0.22"
-      },
-      {
-        "asset": "OlivaDiceJoy.opk",
-        "name": "OlivaDiceJoy.opk",
-        "repo": "OlivOS-Team/OlivaDiceJoy",
-        "version": "3.0.16"
-      },
-      {
-        "asset": "ChanceCustom.opk",
-        "name": "ChanceCustom.opk",
-        "repo": "OlivOS-Team/ChanceCustom",
-        "version": "0.2.20"
-      }
-    ],
-    "updated_at": "2026-06-24T18:16:21+00:00"
+    "olivos_version": "",
+    "olivos_published_at": "",
+    "plugins": [],
+    "updated_at": ""
   },
   "testing": {
-    "olivos_version": "0.11.90-alpha.1",
-    "plugins": [
-      {
-        "asset": "OlivaDiceCore.opk",
-        "name": "OlivaDiceCore.opk",
-        "repo": "OlivOS-Team/OlivaDiceCore",
-        "version": "3.4.53"
-      },
-      {
-        "asset": "OlivaDiceLogger.opk",
-        "name": "OlivaDiceLogger.opk",
-        "repo": "OlivOS-Team/OlivaDiceLogger",
-        "version": "3.0.28"
-      },
-      {
-        "asset": "OlivaStoryCore.opk",
-        "name": "OlivaStoryCore.opk",
-        "repo": "OlivOS-Team/OlivaStoryCore",
-        "version": "3.0.5"
-      },
-      {
-        "asset": "OlivaDiceOdyssey.opk",
-        "name": "OlivaDiceOdyssey.opk",
-        "repo": "OlivOS-Team/OlivaDiceOdyssey",
-        "version": "3.0.15"
-      },
-      {
-        "asset": "OlivaDiceMaster.opk",
-        "name": "OlivaDiceMaster.opk",
-        "repo": "OlivOS-Team/OlivaDiceMaster",
-        "version": "3.0.22"
-      },
-      {
-        "asset": "OlivaDiceJoy.opk",
-        "name": "OlivaDiceJoy.opk",
-        "repo": "OlivOS-Team/OlivaDiceJoy",
-        "version": "3.0.16"
-      },
-      {
-        "asset": "ChanceCustom.opk",
-        "name": "ChanceCustom.opk",
-        "repo": "OlivOS-Team/ChanceCustom",
-        "version": "0.2.20"
-      }
-    ],
-    "updated_at": "2026-06-24T18:16:21+00:00"
+    "olivos_version": "",
+    "olivos_published_at": "",
+    "plugins": [],
+    "updated_at": ""
   }
 }
