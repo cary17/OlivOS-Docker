@@ -2,11 +2,20 @@
 import json
 import os
 import urllib.request
+from datetime import datetime, timezone, timedelta
 
 PLUGIN_DIR = os.environ.get("PLUGIN_DIR", "OlivOS/plugin/app")
 MANIFEST_PATH = os.environ.get("PLUGIN_MANIFEST", "downloaded-plugins.json")
 os.makedirs(PLUGIN_DIR, exist_ok=True)
 manifest = []
+BEIJING_TZ = timezone(timedelta(hours=8))
+
+
+def beijing_time(value):
+    if not value:
+        return ""
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return dt.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S %z")
 
 with open("opk.txt", encoding="utf-8") as f:
     for line in f:
@@ -31,6 +40,7 @@ with open("opk.txt", encoding="utf-8") as f:
                         "name": name,
                         "repo": repo,
                         "version": data.get("tag_name") or data.get("name") or "",
+                        "published_at": beijing_time(data.get("published_at")),
                         "asset": asset["name"],
                     }
                 )
