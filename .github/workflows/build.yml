@@ -26,10 +26,14 @@ jobs:
     outputs:
       stable_raw_version: ${{ steps.release.outputs.stable_raw_version }}
       stable_docker_tag: ${{ steps.release.outputs.stable_docker_tag }}
+      stable_published_at: ${{ steps.release.outputs.stable_published_at }}
       stable_should_build: ${{ steps.release.outputs.stable_should_build }}
+      stable_full_only: ${{ steps.release.outputs.stable_full_only }}
       testing_raw_version: ${{ steps.release.outputs.testing_raw_version }}
       testing_docker_tag: ${{ steps.release.outputs.testing_docker_tag }}
+      testing_published_at: ${{ steps.release.outputs.testing_published_at }}
       testing_should_build: ${{ steps.release.outputs.testing_should_build }}
+      testing_full_only: ${{ steps.release.outputs.testing_full_only }}
       any_should_build: ${{ steps.release.outputs.any_should_build }}
       dockerhub_enabled: ${{ steps.dockerhub_check.outputs.enabled }}
       force_build: ${{ steps.force.outputs.enabled }}
@@ -90,8 +94,13 @@ jobs:
         run: |
           if [ "${{ matrix.channel }}" = "stable" ]; then
             SHOULD_BUILD="${{ needs.check.outputs.stable_should_build }}"
+            FULL_ONLY="${{ needs.check.outputs.stable_full_only }}"
           else
             SHOULD_BUILD="${{ needs.check.outputs.testing_should_build }}"
+            FULL_ONLY="${{ needs.check.outputs.testing_full_only }}"
+          fi
+          if [ "${FULL_ONLY}" = "true" ] && [ "${{ matrix.build_type }}" != "full" ]; then
+            SHOULD_BUILD="false"
           fi
           echo "should_build=${SHOULD_BUILD}" >> "$GITHUB_OUTPUT"
 
@@ -225,6 +234,7 @@ jobs:
               --record build-record.json \
               --channel stable \
               --raw-version "${{ needs.check.outputs.stable_raw_version }}" \
+              --published-at "${{ needs.check.outputs.stable_published_at }}" \
               --plugins downloaded-plugins.json \
               $FORCE_ARG
           fi
@@ -234,6 +244,7 @@ jobs:
               --record build-record.json \
               --channel testing \
               --raw-version "${{ needs.check.outputs.testing_raw_version }}" \
+              --published-at "${{ needs.check.outputs.testing_published_at }}" \
               --plugins downloaded-plugins.json \
               $FORCE_ARG
           fi
