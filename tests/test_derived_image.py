@@ -19,6 +19,8 @@ class DerivedImageConfigurationTests(unittest.TestCase):
         self.assertIn('ARG BASE_IMAGE', content)
         self.assertIn('FROM ${BASE_IMAGE}', content)
         self.assertIn('COPY requirements-extra.txt', content)
+        self.assertIn('COPY entrypoint.sh /entrypoint.sh', content)
+        self.assertIn('ENTRYPOINT ["/entrypoint.sh"]', content)
         self.assertIn('pip install', content)
 
     def test_extra_compose_uses_build_only_configuration(self):
@@ -29,6 +31,18 @@ class DerivedImageConfigurationTests(unittest.TestCase):
         self.assertIn('dockerfile: Dockerfile.extra', content)
         self.assertIn('BASE_IMAGE:', content)
         self.assertNotIn('EXTRA_PACKAGES', content)
+
+    def test_ci_builds_the_derived_image(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text(encoding='utf-8')
+
+        self.assertIn('docker build', workflow)
+        self.assertIn('Dockerfile.extra', workflow)
+
+    def test_readme_documents_extra_packages_migration(self):
+        readme = (ROOT / 'README.md').read_text(encoding='utf-8')
+
+        self.assertIn('EXTRA_PACKAGES', readme)
+        self.assertIn('requirements-extra.txt', readme)
 
 
 if __name__ == '__main__':
