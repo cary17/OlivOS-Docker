@@ -220,7 +220,7 @@ docker compose \
 
 如果构建失败，现有容器仍保持运行。修复网络或依赖版本后重新执行 `build` 即可。
 
-### 仅下载派生镜像所需文件
+### 方法二：只下载派生镜像所需文件
 
 不想克隆完整仓库时，至少下载以下文件：
 
@@ -235,9 +235,25 @@ curl -fsSLO https://raw.githubusercontent.com/cary17/OlivOS-Docker/main/entrypoi
 curl -fsSLO https://raw.githubusercontent.com/cary17/OlivOS-Docker/main/requirements-extra.txt
 ```
 
-随后编辑 `requirements-extra.txt`，再按前面的 Compose 命令构建和启动。
+随后编辑 `requirements-extra.txt`：
 
-### 不使用 Compose，直接构建
+```text
+psutil==5.9.0
+lxml==5.4.0
+```
+
+再构建并启动：
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.extra.yml \
+  up -d --build
+```
+
+这一方法同样不需要 GitHub 登录或仓库写入权限，只需要能够读取公开的 Raw 文件和基础镜像。
+
+### 方法三：不使用 Compose，直接构建
 
 ```bash
 docker build \
@@ -247,13 +263,28 @@ docker build \
   .
 ```
 
-运行时可继续使用原 Compose，只需把其中的镜像改为：
+创建自己的 `docker-compose.yml`：
 
 ```yaml
-image: olivos-custom:latest
+services:
+  olivos:
+    image: olivos-custom:latest
+    container_name: olivos
+    restart: always
+    volumes:
+      - /opt/olivos/conf:/app/OlivOS/conf
+      - /opt/olivos/plugin:/app/OlivOS/plugin
+    environment:
+      TZ: Asia/Shanghai
 ```
 
-并删除 `build:` 配置，或直接继续使用 `docker-compose.extra.yml`。
+然后启动：
+
+```bash
+docker compose up -d
+```
+
+这种方法适合希望完全自行维护 Compose、或者不希望使用仓库提供的 Compose 合并配置的用户。
 
 ### 推送到用户自己的镜像仓库
 

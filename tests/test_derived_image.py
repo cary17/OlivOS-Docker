@@ -43,6 +43,9 @@ class DerivedImageConfigurationTests(unittest.TestCase):
 
         self.assertIn('EXTRA_PACKAGES', readme)
         self.assertIn('requirements-extra.txt', readme)
+        self.assertIn('### 方法一：', readme)
+        self.assertIn('### 方法二：', readme)
+        self.assertIn('### 方法三：', readme)
 
 
 if __name__ == '__main__':
