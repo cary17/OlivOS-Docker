@@ -10,3 +10,8 @@ RUN python -m pip install \
         --retries 5 \
         -r /tmp/requirements-extra.txt \
     && rm -f /tmp/requirements-extra.txt
+
+# 覆盖旧基础镜像的入口，确保启动阶段不会再处理 EXTRA_PACKAGES。
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]

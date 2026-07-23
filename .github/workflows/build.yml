@@ -53,6 +53,11 @@ jobs:
           sh -n entrypoint.sh download_source.sh
           docker compose config --quiet
           docker compose -f docker-compose.yml -f docker-compose.extra.yml config --quiet
+          docker build \
+            --build-arg BASE_IMAGE=ghcr.io/cary17/olivos:latest \
+            --tag olivos-derived-ci:test \
+            --file Dockerfile.extra \
+            .
 
       - name: Resolve force build flag
         id: force
