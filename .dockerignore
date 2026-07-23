@@ -4,6 +4,8 @@ scripts
 tests
 __pycache__
 *.pyc
+downloaded-plugins.json
+OlivOS
 
 README.md
 docker-compose.yml

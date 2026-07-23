@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Local build/download artifacts
+OlivOS/
+downloaded-plugins.json
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example

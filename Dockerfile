@@ -37,10 +37,6 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 RUN echo "=== Installing core dependencies ===" && \
     pip install --no-cache-dir .
 
-# 安装插件生态依赖 extend（所有版本都需要）
-RUN echo "=== Installing extend dependencies ===" && \
-    pip install --no-cache-dir .[extend]
-
 # 安装开发工具 dev（仅 dev 版本）
 RUN if [ "$BUILD_TYPE" = "dev" ]; then \
         echo "=== Installing dev tools ===" && \
@@ -69,21 +65,12 @@ RUN if [ "$BUILD_TYPE" = "full" ]; then \
 
 # 清理不必要的文件，减小镜像体积
 RUN rm -rf /root/.cache/pip && \
-    # 清理 Python 包缓存
+    # 清理 Python 字节码和构建元数据，不递归删除第三方包的数据文件
     find /usr/local/lib/python3.11 -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/local/lib/python3.11 -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/local/lib/python3.11 -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true && \
-    # 清理源码中的缓存和测试文件
     find /app/OlivOS -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
     find /app/OlivOS -type d -name '.git' -exec rm -rf {} + 2>/dev/null || true && \
-    find /app/OlivOS -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true && \
-    find /app/OlivOS -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true && \
     find /app/OlivOS -type f -name '*.pyc' -delete 2>/dev/null || true && \
-    find /app/OlivOS -type f -name '*.pyo' -delete 2>/dev/null || true && \
-    # 清理文档文件
-    find /app/OlivOS -type f -name '*.md' -delete 2>/dev/null || true && \
-    find /app/OlivOS -type f -name '*.rst' -delete 2>/dev/null || true && \
-    find /app/OlivOS -type f -name '*.txt' ! -name 'requirements.txt' -delete 2>/dev/null || true
+    find /app/OlivOS -type f -name '*.pyo' -delete 2>/dev/null || true
 
 # ==================== 运行阶段 ====================
 FROM python:3.11-slim
@@ -113,4 +100,5 @@ ENV PIP_NO_CACHE_DIR=1
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+STOPSIGNAL SIGTERM
 ENTRYPOINT ["/entrypoint.sh"]
