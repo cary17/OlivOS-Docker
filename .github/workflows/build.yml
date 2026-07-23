@@ -52,6 +52,7 @@ jobs:
           python3 -m compileall -q download_plugins.py scripts tests
           sh -n entrypoint.sh download_source.sh
           docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.extra.yml config --quiet
 
       - name: Resolve force build flag
         id: force

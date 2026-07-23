@@ -13,5 +13,3 @@ services:
       - /opt/olivos/plugin:/app/OlivOS/plugin
     environment:
       TZ: Asia/Shanghai
-      # 添加额外 pip 依赖，多个用空格分隔
-      #EXTRA_PACKAGES: "psutil==5.9.0 lxml>=4.9"
