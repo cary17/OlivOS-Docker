@@ -32,11 +32,11 @@ class DerivedImageConfigurationTests(unittest.TestCase):
         self.assertIn('BASE_IMAGE:', content)
         self.assertNotIn('EXTRA_PACKAGES', content)
 
-    def test_ci_builds_the_derived_image(self):
+    def test_ci_does_not_build_or_publish_user_derived_image(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text(encoding='utf-8')
 
-        self.assertIn('docker build', workflow)
-        self.assertIn('Dockerfile.extra', workflow)
+        self.assertNotIn('olivos-derived-ci', workflow)
+        self.assertNotIn('--file Dockerfile.extra', workflow)
 
     def test_readme_documents_extra_packages_migration(self):
         readme = (ROOT / 'README.md').read_text(encoding='utf-8')
