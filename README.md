@@ -103,6 +103,8 @@ docker compose up -d
 
 额外 Python 依赖不再通过 `EXTRA_PACKAGES` 在容器启动时安装，而是在 Docker 镜像构建阶段安装。
 
+派生镜像只是提供给有额外依赖需求的用户在自己的机器上按需构建。项目的 GitHub Actions 不会预构建或推送 `olivos-custom`，官方镜像仓库只发布 full、core 和 dev 镜像。
+
 这样可以保证：
 
 - 依赖安装失败时只会导致构建失败，不会替换当前正在运行的容器；
