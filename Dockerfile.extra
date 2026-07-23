@@ -1,0 +1,12 @@
+ARG BASE_IMAGE=ghcr.io/cary17/olivos:latest
+FROM ${BASE_IMAGE}
+
+USER root
+COPY requirements-extra.txt /tmp/requirements-extra.txt
+RUN python -m pip install \
+        --root-user-action=ignore \
+        --no-cache-dir \
+        --timeout 30 \
+        --retries 5 \
+        -r /tmp/requirements-extra.txt \
+    && rm -f /tmp/requirements-extra.txt

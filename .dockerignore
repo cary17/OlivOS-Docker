@@ -9,4 +9,5 @@ OlivOS
 
 README.md
 docker-compose.yml
+docker-compose.extra.yml
 build-record.json

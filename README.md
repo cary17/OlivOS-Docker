@@ -25,11 +25,30 @@
 docker compose up -d
 ```
 
-## 配置项
+## 额外 Python 依赖
 
-| 环境变量 | 说明 |
-|---|---|
-| `EXTRA_PACKAGES` | 启动时额外安装的 pip 包，空格分隔；生产环境建议使用固定版本的派生镜像 |
+默认容器启动时不会联网安装 Python 包。需要额外依赖时，将依赖写入 `requirements-extra.txt`，然后使用派生镜像配置构建：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.extra.yml build
+docker compose -f docker-compose.yml -f docker-compose.extra.yml up -d
+```
+
+例如：
+
+```text
+psutil==5.9.0
+lxml==5.4.0
+```
+
+派生镜像默认基于 `ghcr.io/cary17/olivos:latest`。如需使用 core、dev、testing 或指定版本，可在构建时设置：
+
+```bash
+OLIVOS_BASE_IMAGE=ghcr.io/cary17/olivos:testing \
+docker compose -f docker-compose.yml -f docker-compose.extra.yml build
+```
+
+依赖在镜像构建阶段安装。安装失败时构建会失败，原有可用容器不会因启动时网络故障进入重启循环；构建成功后的容器启动也不再依赖 PyPI 网络。
 
 `core` 表示不预装 OPK 插件；`full` 预装 `opk.txt` 及 `opk/` 中列出的插件；`dev` 在核心镜像基础上增加调试工具。
 

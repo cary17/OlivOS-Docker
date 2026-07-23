@@ -1,0 +1,8 @@
+services:
+  olivos:
+    image: olivos-custom:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.extra
+      args:
+        BASE_IMAGE: ${OLIVOS_BASE_IMAGE:-ghcr.io/cary17/olivos:latest}
