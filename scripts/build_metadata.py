@@ -4,13 +4,18 @@ import json
 import os
 import re
 import sys
+import time
+import urllib.error
 import urllib.request
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 RELEASES_API = "https://api.github.com/repos/OlivOS-Team/OlivOS/releases"
 CHANNELS = ("stable", "testing")
 BEIJING_TZ = timezone(timedelta(hours=8))
+PRERELEASE_ORDER = {"dev": 0, "alpha": 1, "a": 1, "beta": 2, "b": 2, "rc": 3}
+REQUEST_TIMEOUT = 30
+REQUEST_RETRIES = 3
 
 
 def normalize_version(version):
@@ -19,16 +24,16 @@ def normalize_version(version):
 
 def version_key(version):
     version = normalize_version(version)
-    parts = re.split(r"([0-9]+|[A-Za-z]+)", version)
-    key = []
-    for part in parts:
-        if not part or part in ".-_+":
-            continue
-        if part.isdigit():
-            key.append((1, int(part)))
-        else:
-            key.append((0, part.lower()))
-    return key
+    main, separator, suffix = version.partition("-")
+    release = tuple(int(part) if part.isdigit() else 0 for part in main.split("."))
+    if not separator:
+        return release, (1,)
+    match = re.match(r"([A-Za-z]+)[.-]?(\d*)", suffix)
+    if match:
+        label = match.group(1).lower()
+        number = int(match.group(2) or 0)
+        return release, (0, PRERELEASE_ORDER.get(label, -1), label, number, suffix)
+    return release, (0, -1, suffix)
 
 
 def parse_time(value):
@@ -143,6 +148,9 @@ def plugins_changed(record, channel, remote_plugins):
         for plugin in record.get(channel, {}).get("plugins", [])
         if plugin_key(plugin)
     }
+    remote_keys = {plugin_key(plugin) for plugin in remote_plugins if plugin_key(plugin)}
+    if remote_keys != set(current_plugins):
+        return True
     for plugin in remote_plugins:
         key = plugin_key(plugin)
         if not key:
@@ -152,6 +160,16 @@ def plugins_changed(record, channel, remote_plugins):
             return True
         remote_version = normalize_version(plugin.get("version", ""))
         current_version = normalize_version(current.get("version", ""))
+        remote_hash = plugin.get("sha256", "")
+        current_hash = current.get("sha256", "")
+        if remote_hash and current_hash and remote_hash != current_hash:
+            return True
+        remote_asset_id = plugin.get("asset_id")
+        current_asset_id = current.get("asset_id")
+        if remote_asset_id and not current_asset_id:
+            return True
+        if remote_asset_id and current_asset_id and remote_asset_id != current_asset_id:
+            return True
         if version_key(remote_version) > version_key(current_version):
             return True
         if version_key(remote_version) == version_key(current_version) and time_newer(
@@ -161,16 +179,28 @@ def plugins_changed(record, channel, remote_plugins):
     return False
 
 
-def fetch_releases(token):
+def request_json(url, token="", retries=REQUEST_RETRIES):
     headers = {
         "Accept": "application/vnd.github+json",
         "User-Agent": "olivos-docker-build",
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(RELEASES_API, headers=headers)
-    with urllib.request.urlopen(req) as response:
-        return json.load(response)
+    request = urllib.request.Request(url, headers=headers)
+    last_error = None
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
+                return json.load(response)
+        except (OSError, urllib.error.HTTPError, urllib.error.URLError) as exc:
+            last_error = exc
+            if attempt + 1 < retries:
+                time.sleep(2**attempt)
+    raise RuntimeError(f"Failed to request {url}") from last_error
+
+
+def fetch_releases(token):
+    return request_json(RELEASES_API, token)
 
 
 def parse_opk_line(line):
@@ -178,21 +208,21 @@ def parse_opk_line(line):
     if not line:
         return None
     sep = "：" if "：" in line else ":"
+    if sep not in line:
+        raise ValueError(f"Invalid OPK manifest entry: {line}")
     name, url = line.split(sep, 1)
-    repo = url.strip().replace("https://github.com/", "").rstrip("/").removesuffix("/releases")
+    url = url.strip()
+    prefix = "https://github.com/"
+    if not name.strip().endswith(".opk") or not url.startswith(prefix):
+        raise ValueError(f"Invalid OPK manifest entry: {line}")
+    repo = url.removeprefix(prefix).rstrip("/").removesuffix("/releases")
+    if len(repo.split("/")) != 2:
+        raise ValueError(f"Invalid GitHub repository: {repo}")
     return name.strip(), repo
 
 
 def fetch_latest_release(repo, token=""):
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "olivos-docker-build",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(f"https://api.github.com/repos/{repo}/releases/latest", headers=headers)
-    with urllib.request.urlopen(req) as response:
-        return json.load(response)
+    return request_json(f"https://api.github.com/repos/{repo}/releases/latest", token)
 
 
 def fetch_plugin_metadata(opk_path="opk.txt", token=""):
@@ -219,6 +249,14 @@ def fetch_plugin_metadata(opk_path="opk.txt", token=""):
                     "version": release.get("tag_name") or release.get("name") or "",
                     "published_at": beijing_time(release.get("published_at")),
                     "asset": asset_name,
+                    "asset_id": next(
+                        (
+                            asset.get("id")
+                            for asset in release.get("assets", [])
+                            if asset.get("name") == asset_name
+                        ),
+                        None,
+                    ),
                 }
             )
     return plugins
