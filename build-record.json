@@ -5,55 +5,76 @@
     "plugins": [
       {
         "asset": "OlivaDiceCore.opk",
+        "asset_id": 334732093,
         "name": "OlivaDiceCore.opk",
+        "namespace": "OlivaDiceCore",
         "published_at": "2025-12-31 12:22:21 +0800",
         "repo": "OlivOS-Team/OlivaDiceCore",
+        "sha256": "f980d5cc3e3c50b787d577902b2b9c2003e068d95a6547a7d0ec8350e71629a4",
         "version": "3.4.53"
       },
       {
         "asset": "OlivaDiceLogger.opk",
+        "asset_id": 333771686,
         "name": "OlivaDiceLogger.opk",
+        "namespace": "OlivaDiceLogger",
         "published_at": "2025-12-29 01:11:08 +0800",
         "repo": "OlivOS-Team/OlivaDiceLogger",
+        "sha256": "d7b185c83fe46a2f77cf2ca0a726ed7defa98671bbc9f1e6e07bbf62faf0bf4b",
         "version": "3.0.28"
       },
       {
         "asset": "OlivaStoryCore.opk",
+        "asset_id": 333771527,
         "name": "OlivaStoryCore.opk",
+        "namespace": "OlivaStoryCore",
         "published_at": "2025-12-29 01:11:16 +0800",
         "repo": "OlivOS-Team/OlivaStoryCore",
+        "sha256": "d1c7bf876172fa0e1f55d2b96455583de193d66a5b014badb05d94f28074ea58",
         "version": "3.0.5"
       },
       {
         "asset": "OlivaDiceOdyssey.opk",
+        "asset_id": 333771563,
         "name": "OlivaDiceOdyssey.opk",
+        "namespace": "OlivaDiceOdyssey",
         "published_at": "2025-12-29 01:11:12 +0800",
         "repo": "OlivOS-Team/OlivaDiceOdyssey",
+        "sha256": "db038fd0cb79911cf5c25d88f476244f123d23315fedb867152d33bc4c542ea8",
         "version": "3.0.15"
       },
       {
         "asset": "OlivaDiceMaster.opk",
+        "asset_id": 334731911,
         "name": "OlivaDiceMaster.opk",
+        "namespace": "OlivaDiceMaster",
         "published_at": "2025-12-31 12:22:16 +0800",
         "repo": "OlivOS-Team/OlivaDiceMaster",
+        "sha256": "6a8ab90748fbd83085bbcb2d1989212952c1ec7ddb4eab2308a485eb0272bb5d",
         "version": "3.0.22"
       },
       {
         "asset": "OlivaDiceJoy.opk",
+        "asset_id": 333771718,
         "name": "OlivaDiceJoy.opk",
+        "namespace": "OlivaDiceJoy",
         "published_at": "2025-12-29 01:10:57 +0800",
         "repo": "OlivOS-Team/OlivaDiceJoy",
+        "sha256": "0157b21bedddfb9df9c1e19b9278bc0ad7b2d0b2564d238f78f667e585827379",
         "version": "3.0.16"
       },
       {
         "asset": "ChanceCustom.opk",
+        "asset_id": 329420566,
         "name": "ChanceCustom.opk",
+        "namespace": "ChanceCustom",
         "published_at": "2025-12-17 01:03:32 +0800",
         "repo": "OlivOS-Team/ChanceCustom",
+        "sha256": "b44e5bd038cdc502ca7bfb36dd40249cb5996e0d4d4644b405c1190b7500449c",
         "version": "0.2.20"
       }
     ],
-    "updated_at": "2026-06-26 22:42:03 +0800"
+    "updated_at": "2026-07-24 10:59:29 +0800"
   },
   "testing": {
     "olivos_published_at": "2026-01-28 04:53:44 +0800",
@@ -61,54 +82,75 @@
     "plugins": [
       {
         "asset": "OlivaDiceCore.opk",
+        "asset_id": 334732093,
         "name": "OlivaDiceCore.opk",
+        "namespace": "OlivaDiceCore",
         "published_at": "2025-12-31 12:22:21 +0800",
         "repo": "OlivOS-Team/OlivaDiceCore",
+        "sha256": "f980d5cc3e3c50b787d577902b2b9c2003e068d95a6547a7d0ec8350e71629a4",
         "version": "3.4.53"
       },
       {
         "asset": "OlivaDiceLogger.opk",
+        "asset_id": 333771686,
         "name": "OlivaDiceLogger.opk",
+        "namespace": "OlivaDiceLogger",
         "published_at": "2025-12-29 01:11:08 +0800",
         "repo": "OlivOS-Team/OlivaDiceLogger",
+        "sha256": "d7b185c83fe46a2f77cf2ca0a726ed7defa98671bbc9f1e6e07bbf62faf0bf4b",
         "version": "3.0.28"
       },
       {
         "asset": "OlivaStoryCore.opk",
+        "asset_id": 333771527,
         "name": "OlivaStoryCore.opk",
+        "namespace": "OlivaStoryCore",
         "published_at": "2025-12-29 01:11:16 +0800",
         "repo": "OlivOS-Team/OlivaStoryCore",
+        "sha256": "d1c7bf876172fa0e1f55d2b96455583de193d66a5b014badb05d94f28074ea58",
         "version": "3.0.5"
       },
       {
         "asset": "OlivaDiceOdyssey.opk",
+        "asset_id": 333771563,
         "name": "OlivaDiceOdyssey.opk",
+        "namespace": "OlivaDiceOdyssey",
         "published_at": "2025-12-29 01:11:12 +0800",
         "repo": "OlivOS-Team/OlivaDiceOdyssey",
+        "sha256": "db038fd0cb79911cf5c25d88f476244f123d23315fedb867152d33bc4c542ea8",
         "version": "3.0.15"
       },
       {
         "asset": "OlivaDiceMaster.opk",
+        "asset_id": 334731911,
         "name": "OlivaDiceMaster.opk",
+        "namespace": "OlivaDiceMaster",
         "published_at": "2025-12-31 12:22:16 +0800",
         "repo": "OlivOS-Team/OlivaDiceMaster",
+        "sha256": "6a8ab90748fbd83085bbcb2d1989212952c1ec7ddb4eab2308a485eb0272bb5d",
         "version": "3.0.22"
       },
       {
         "asset": "OlivaDiceJoy.opk",
+        "asset_id": 333771718,
         "name": "OlivaDiceJoy.opk",
+        "namespace": "OlivaDiceJoy",
         "published_at": "2025-12-29 01:10:57 +0800",
         "repo": "OlivOS-Team/OlivaDiceJoy",
+        "sha256": "0157b21bedddfb9df9c1e19b9278bc0ad7b2d0b2564d238f78f667e585827379",
         "version": "3.0.16"
       },
       {
         "asset": "ChanceCustom.opk",
+        "asset_id": 329420566,
         "name": "ChanceCustom.opk",
+        "namespace": "ChanceCustom",
         "published_at": "2025-12-17 01:03:32 +0800",
         "repo": "OlivOS-Team/ChanceCustom",
+        "sha256": "b44e5bd038cdc502ca7bfb36dd40249cb5996e0d4d4644b405c1190b7500449c",
         "version": "0.2.20"
       }
     ],
-    "updated_at": "2026-06-26 22:42:03 +0800"
+    "updated_at": "2026-07-24 10:59:29 +0800"
   }
 }
