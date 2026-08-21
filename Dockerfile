@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
     && rm -rf /var/lib/apt/lists/*
 
+# IPv4 优先（RFC 6724 地址选择策略）：避免阵发性 IPv6 黑洞拖慢源码与依赖下载
+RUN printf 'precedence ::ffff:0:0/96  100\n' >> /etc/gai.conf
+
 WORKDIR /app
 
 # 下载源码
@@ -82,6 +85,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         $(if [ "$BUILD_TYPE" = "dev" ]; then echo "vim curl procps htop"; fi) \
     && rm -rf /var/lib/apt/lists/*
+
+# IPv4 优先（RFC 6724 地址选择策略）：避免阵发性 IPv6 黑洞拖慢平台 API 请求
+RUN printf 'precedence ::ffff:0:0/96  100\n' >> /etc/gai.conf
 
 WORKDIR /app
 

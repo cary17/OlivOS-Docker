@@ -2,6 +2,10 @@ ARG BASE_IMAGE=ghcr.io/cary17/olivos:latest
 FROM ${BASE_IMAGE}
 
 USER root
+
+# IPv4 优先（RFC 6724 地址选择策略）：兜底旧基础镜像未内置该设置的情况
+RUN printf 'precedence ::ffff:0:0/96  100\n' >> /etc/gai.conf
+
 COPY requirements-extra.txt /tmp/requirements-extra.txt
 RUN python -m pip install \
         --root-user-action=ignore \
