@@ -115,6 +115,47 @@ def validate_opk(path):
     return app
 
 
+def normalize_release_zip(path):
+    path = Path(path)
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = archive.namelist()
+            roots = {name.split('/', 1)[0] for name in names if name and '/' in name}
+            if len(roots) != 1:
+                raise ValueError('Release ZIP must contain exactly one plugin directory')
+            prefix = roots.pop() + '/'
+            if any(not name.startswith(prefix) for name in names if name):
+                raise ValueError('Release ZIP contains files outside its plugin directory')
+            stripped = {name.removeprefix(prefix) for name in names if not name.endswith('/')}
+            missing = REQUIRED_OPK_FILES - stripped
+            if missing:
+                raise ValueError(f'Release ZIP missing required files: {sorted(missing)}')
+            if archive.testzip() is not None:
+                raise ValueError('Release ZIP contains a corrupt file')
+            temporary = path.with_suffix(path.suffix + '.normalized')
+            with zipfile.ZipFile(temporary, 'w', compression=zipfile.ZIP_DEFLATED) as output:
+                for info in archive.infolist():
+                    if info.is_dir():
+                        continue
+                    name = info.filename.removeprefix(prefix)
+                    output.writestr(name, archive.read(info.filename))
+        os.replace(temporary, path)
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f'Invalid Release ZIP archive: {path}') from exc
+    finally:
+        temporary = path.with_suffix(path.suffix + '.normalized')
+        temporary.unlink(missing_ok=True)
+    return validate_opk(path)
+
+
+def select_release_asset(release):
+    assets = release.get('assets', [])
+    return next(
+        (item for item in assets if item.get('name', '').endswith('.opk')),
+        next((item for item in assets if item.get('name', '').endswith('.zip')), None),
+    )
+
+
 def download_plugins(opk_path='opk.txt', token=''):
     PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
     manifest = []
@@ -126,19 +167,17 @@ def download_plugins(opk_path='opk.txt', token=''):
             name, repo = parsed
             api = f'https://api.github.com/repos/{repo}/releases/latest'
             release = request_json(api, token)
-            asset = next(
-                (item for item in release.get('assets', []) if item.get('name', '').endswith('.opk')),
-                None,
-            )
+            asset = select_release_asset(release)
             if asset is None:
-                raise RuntimeError(f'No OPK asset found for {repo} (manifest line {line_number})')
+                raise RuntimeError(f'No OPK or single-plugin ZIP asset found for {repo} (manifest line {line_number})')
+            asset_name = asset['name']
             destination = PLUGIN_DIR / name
             print(f"Downloading {name} ← {asset['browser_download_url']}")
             app = None
 
             def validate_download(path):
                 nonlocal app
-                app = validate_opk(path)
+                app = normalize_release_zip(path) if asset_name.endswith('.zip') else validate_opk(path)
 
             download_file(asset['browser_download_url'], destination, validator=validate_download)
             manifest.append(

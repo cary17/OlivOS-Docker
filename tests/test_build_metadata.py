@@ -84,6 +84,12 @@ class VersionComparisonTests(unittest.TestCase):
 
 
 class PluginComparisonTests(unittest.TestCase):
+    def test_zip_release_asset_is_used_when_opk_is_absent(self):
+        asset = build_metadata.select_plugin_asset({'assets': [{'name': 'OlivaDiceWebUI.zip', 'id': 1}]})
+
+        self.assertIsNotNone(asset)
+        self.assertEqual(asset['name'], 'OlivaDiceWebUI.zip')
+
     def test_removed_plugin_needs_full_build(self):
         record = {
             "stable": {

@@ -225,6 +225,14 @@ def fetch_latest_release(repo, token=""):
     return request_json(f"https://api.github.com/repos/{repo}/releases/latest", token)
 
 
+def select_plugin_asset(release):
+    assets = release.get("assets", [])
+    return next(
+        (asset for asset in assets if asset.get("name", "").endswith(".opk")),
+        next((asset for asset in assets if asset.get("name", "").endswith(".zip")), None),
+    )
+
+
 def fetch_plugin_metadata(opk_path="opk.txt", token=""):
     plugins = []
     path = Path(opk_path)
@@ -237,11 +245,8 @@ def fetch_plugin_metadata(opk_path="opk.txt", token=""):
                 continue
             name, repo = parsed
             release = fetch_latest_release(repo, token)
-            asset_name = ""
-            for asset in release.get("assets", []):
-                if asset.get("name", "").endswith(".opk"):
-                    asset_name = asset["name"]
-                    break
+            asset = select_plugin_asset(release)
+            asset_name = asset.get("name", "") if asset else ""
             plugins.append(
                 {
                     "name": name,
@@ -249,14 +254,7 @@ def fetch_plugin_metadata(opk_path="opk.txt", token=""):
                     "version": release.get("tag_name") or release.get("name") or "",
                     "published_at": beijing_time(release.get("published_at")),
                     "asset": asset_name,
-                    "asset_id": next(
-                        (
-                            asset.get("id")
-                            for asset in release.get("assets", [])
-                            if asset.get("name") == asset_name
-                        ),
-                        None,
-                    ),
+                    "asset_id": asset.get("id") if asset else None,
                 }
             )
     return plugins
