@@ -5,11 +5,16 @@ on:
     - cron: '0 */12 * * *'
   workflow_dispatch:
     inputs:
-      force_build:
-        description: 'Force build stable and testing releases without updating build-record.json'
+      force_channel:
+        description: 'Force build one release channel without updating build-record.json'
         required: false
-        type: boolean
-        default: false
+        type: choice
+        default: none
+        options:
+          - none
+          - stable
+          - testing
+          - both
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -54,13 +59,22 @@ jobs:
           docker compose config --quiet
           docker compose -f docker-compose.yml -f docker-compose.extra.yml config --quiet
 
-      - name: Resolve force build flag
+      - name: Resolve force build selection
         id: force
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force_build }}" = "true" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
+          CHANNEL="none"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CHANNEL="${{ inputs.force_channel }}"
+          fi
+          case "$CHANNEL" in
+            none|stable|testing|both) ;;
+            *) echo "Invalid force channel: $CHANNEL" >&2; exit 1 ;;
+          esac
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          if [ "$CHANNEL" = "none" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Detect latest OlivOS releases
@@ -68,11 +82,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          FORCE_ARG=""
+          python3 scripts/build_metadata.py detect --record build-record.json
           if [ "${{ steps.force.outputs.enabled }}" = "true" ]; then
-            FORCE_ARG="--force"
+            case "${{ steps.force.outputs.channel }}" in
+              stable)
+                echo "stable_should_build=true" >> "$GITHUB_OUTPUT"
+                echo "testing_should_build=false" >> "$GITHUB_OUTPUT"
+                ;;
+              testing)
+                echo "stable_should_build=false" >> "$GITHUB_OUTPUT"
+                echo "testing_should_build=true" >> "$GITHUB_OUTPUT"
+                ;;
+              both)
+                echo "stable_should_build=true" >> "$GITHUB_OUTPUT"
+                echo "testing_should_build=true" >> "$GITHUB_OUTPUT"
+                ;;
+            esac
+            echo "any_should_build=true" >> "$GITHUB_OUTPUT"
           fi
-          python3 scripts/build_metadata.py detect --record build-record.json $FORCE_ARG
 
       - name: Check Docker Hub secrets
         id: dockerhub_check
