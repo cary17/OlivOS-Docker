@@ -31,6 +31,20 @@ class OpkValidationTests(unittest.TestCase):
 
             self.assertEqual(metadata['namespace'], 'demo')
 
+    def test_normalize_release_zip_strips_single_plugin_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'release.opk'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('Demo/app.json', json.dumps({'namespace': 'demo'}))
+                archive.writestr('Demo/__init__.py', '')
+                archive.writestr('Demo/main.py', '')
+
+            metadata = download_plugins.normalize_release_zip(path)
+
+            self.assertEqual(metadata['namespace'], 'demo')
+            with zipfile.ZipFile(path) as archive:
+                self.assertEqual(set(archive.namelist()), {'app.json', '__init__.py', 'main.py'})
+
     def test_sha256_file_returns_digest(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'file.opk'
