@@ -90,70 +90,26 @@ class PluginComparisonTests(unittest.TestCase):
         self.assertIsNotNone(asset)
         self.assertEqual(asset['name'], 'OlivaDiceWebUI.zip')
 
-    def test_removed_plugin_needs_full_build(self):
-        record = {
-            "stable": {
-                "plugins": [
-                    {"name": "keep.opk", "version": "1.0.0"},
-                    {"name": "removed.opk", "version": "1.0.0"},
-                ]
-            }
-        }
-        plugins = [{"name": "keep.opk", "version": "1.0.0"}]
-
-        self.assertTrue(build_metadata.plugins_changed(record, "stable", plugins))
-
-    def test_plugin_update_needs_full_build(self):
-        record = {
-            "stable": {
-                "plugins": [
-                    {
-                        "name": "OlivaDiceCore.opk",
-                        "version": "3.4.52",
-                        "published_at": "2026-01-01 08:00:00 +0800",
-                    }
-                ]
-            }
-        }
-        plugins = [
-            {
-                "name": "OlivaDiceCore.opk",
-                "version": "3.4.53",
-                "published_at": "2026-01-02 08:00:00 +0800",
-            }
+    def test_plugin_updates_do_not_trigger_build(self):
+        releases = [
+            {"tag_name": "0.11.81", "draft": False, "prerelease": False, "published_at": "2026-01-02T00:00:00Z"},
+            {"tag_name": "0.11.81-rc.1", "draft": False, "prerelease": True, "published_at": "2026-01-02T00:00:00Z"},
         ]
+        record = {
+            "stable": {"olivos_version": "0.11.81", "olivos_published_at": "2026-01-02 08:00:00 +0800"},
+            "testing": {"olivos_version": "0.11.81-rc.1", "olivos_published_at": "2026-01-02 08:00:00 +0800"},
+        }
+        plugins = [{"name": "OlivaDiceWebUI.opk", "version": "new-release", "asset_id": 2}]
 
-        self.assertTrue(build_metadata.plugins_changed(record, "stable", plugins))
+        with (
+            mock.patch("scripts.build_metadata.fetch_releases", return_value=releases),
+            mock.patch("scripts.build_metadata.fetch_plugin_metadata", return_value=plugins),
+            mock.patch("scripts.build_metadata.load_record", return_value=record),
+        ):
+            outputs = build_metadata.detect("ignored.json")
 
-    def test_same_plugin_versions_and_times_skip(self):
-        plugins = [
-            {
-                "name": "OlivaDiceCore.opk",
-                "version": "3.4.53",
-                "published_at": "2026-01-02 08:00:00 +0800",
-            }
-        ]
-        record = {"stable": {"plugins": plugins}}
-
-        self.assertFalse(build_metadata.plugins_changed(record, "stable", plugins))
-
-    def test_changed_plugin_hash_needs_full_build(self):
-        current = [{"name": "plugin.opk", "version": "1.0.0", "sha256": "old"}]
-        remote = [{"name": "plugin.opk", "version": "1.0.0", "sha256": "new"}]
-
-        self.assertTrue(build_metadata.plugins_changed({"stable": {"plugins": current}}, "stable", remote))
-
-    def test_replaced_release_asset_needs_full_build(self):
-        current = [{"name": "plugin.opk", "version": "1.0.0", "asset_id": 100}]
-        remote = [{"name": "plugin.opk", "version": "1.0.0", "asset_id": 101}]
-
-        self.assertTrue(build_metadata.plugins_changed({"stable": {"plugins": current}}, "stable", remote))
-
-    def test_missing_recorded_asset_id_needs_metadata_refresh(self):
-        current = [{"name": "plugin.opk", "version": "1.0.0"}]
-        remote = [{"name": "plugin.opk", "version": "1.0.0", "asset_id": 101}]
-
-        self.assertTrue(build_metadata.plugins_changed({"stable": {"plugins": current}}, "stable", remote))
+        self.assertEqual(outputs["stable_should_build"], "false")
+        self.assertEqual(outputs["testing_should_build"], "false")
 
 
 class RecordUpdateTests(unittest.TestCase):
@@ -265,5 +221,4 @@ class NetworkRequestTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 2)
 
 
-if __name__ == "__main__":
-    unittest.main()
+if __name__ == "__main__":n    unittest.main()

@@ -286,9 +286,8 @@ def detect(record_path, force=False, token="", opk_path="opk.txt"):
         raw_version = selected[channel]["raw_version"]
         docker_tag = selected[channel]["docker_tag"]
         olivos_update = olivos_changed(record, channel, selected[channel])
-        plugin_update = plugins_changed(record, channel, remote_plugins)
-        should_build = bool(raw_version) and (force or olivos_update or plugin_update)
-        full_only = bool(raw_version) and plugin_update and not olivos_update and not force
+        should_build = bool(raw_version) and (force or olivos_update)
+        full_only = False
         any_should_build = any_should_build or should_build
         outputs[f"{channel}_raw_version"] = raw_version
         outputs[f"{channel}_docker_tag"] = docker_tag
@@ -351,7 +350,7 @@ def main(argv=None):
     if args.command == "detect":
         detect(args.record, args.force, args.token, args.opk)
     elif args.command == "update-record":
-        update_record(args.record, args.channel, args.raw_version, args.published_at, args.plugins, args.force)
+        update_record(args.record, args.raw_version, args.published_at, args.plugins, args.force)
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0
