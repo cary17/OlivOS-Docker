@@ -138,47 +138,6 @@ def olivos_changed(record, channel, remote_release):
     return time_newer(remote_release.get("published_at", ""), channel_record.get("olivos_published_at", ""))
 
 
-def plugin_key(plugin):
-    return plugin.get("name") or plugin.get("repo") or plugin.get("asset") or ""
-
-
-def plugins_changed(record, channel, remote_plugins):
-    current_plugins = {
-        plugin_key(plugin): plugin
-        for plugin in record.get(channel, {}).get("plugins", [])
-        if plugin_key(plugin)
-    }
-    remote_keys = {plugin_key(plugin) for plugin in remote_plugins if plugin_key(plugin)}
-    if remote_keys != set(current_plugins):
-        return True
-    for plugin in remote_plugins:
-        key = plugin_key(plugin)
-        if not key:
-            continue
-        current = current_plugins.get(key)
-        if current is None:
-            return True
-        remote_version = normalize_version(plugin.get("version", ""))
-        current_version = normalize_version(current.get("version", ""))
-        remote_hash = plugin.get("sha256", "")
-        current_hash = current.get("sha256", "")
-        if remote_hash and current_hash and remote_hash != current_hash:
-            return True
-        remote_asset_id = plugin.get("asset_id")
-        current_asset_id = current.get("asset_id")
-        if remote_asset_id and not current_asset_id:
-            return True
-        if remote_asset_id and current_asset_id and remote_asset_id != current_asset_id:
-            return True
-        if version_key(remote_version) > version_key(current_version):
-            return True
-        if version_key(remote_version) == version_key(current_version) and time_newer(
-            plugin.get("published_at", ""), current.get("published_at", "")
-        ):
-            return True
-    return False
-
-
 def request_json(url, token="", retries=REQUEST_RETRIES):
     headers = {
         "Accept": "application/vnd.github+json",
@@ -203,63 +162,6 @@ def fetch_releases(token):
     return request_json(RELEASES_API, token)
 
 
-def parse_opk_line(line):
-    line = line.strip()
-    if not line:
-        return None
-    sep = "：" if "：" in line else ":"
-    if sep not in line:
-        raise ValueError(f"Invalid OPK manifest entry: {line}")
-    name, url = line.split(sep, 1)
-    url = url.strip()
-    prefix = "https://github.com/"
-    if not name.strip().endswith(".opk") or not url.startswith(prefix):
-        raise ValueError(f"Invalid OPK manifest entry: {line}")
-    repo = url.removeprefix(prefix).rstrip("/").removesuffix("/releases")
-    if len(repo.split("/")) != 2:
-        raise ValueError(f"Invalid GitHub repository: {repo}")
-    return name.strip(), repo
-
-
-def fetch_latest_release(repo, token=""):
-    return request_json(f"https://api.github.com/repos/{repo}/releases/latest", token)
-
-
-def select_plugin_asset(release):
-    assets = release.get("assets", [])
-    return next(
-        (asset for asset in assets if asset.get("name", "").endswith(".opk")),
-        next((asset for asset in assets if asset.get("name", "").endswith(".zip")), None),
-    )
-
-
-def fetch_plugin_metadata(opk_path="opk.txt", token=""):
-    plugins = []
-    path = Path(opk_path)
-    if not path.exists():
-        return plugins
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            parsed = parse_opk_line(line)
-            if parsed is None:
-                continue
-            name, repo = parsed
-            release = fetch_latest_release(repo, token)
-            asset = select_plugin_asset(release)
-            asset_name = asset.get("name", "") if asset else ""
-            plugins.append(
-                {
-                    "name": name,
-                    "repo": repo,
-                    "version": release.get("tag_name") or release.get("name") or "",
-                    "published_at": beijing_time(release.get("published_at")),
-                    "asset": asset_name,
-                    "asset_id": asset.get("id") if asset else None,
-                }
-            )
-    return plugins
-
-
 def github_bool(value):
     return "true" if value else "false"
 
@@ -274,10 +176,9 @@ def append_github_output(outputs):
         print("\n".join(lines))
 
 
-def detect(record_path, force=False, token="", opk_path="opk.txt"):
+def detect(record_path, force=False, token=""):
     releases = fetch_releases(token)
     selected = select_latest_releases(releases)
-    remote_plugins = fetch_plugin_metadata(opk_path, token)
     record = load_record(record_path)
 
     outputs = {}
@@ -287,25 +188,21 @@ def detect(record_path, force=False, token="", opk_path="opk.txt"):
         docker_tag = selected[channel]["docker_tag"]
         olivos_update = olivos_changed(record, channel, selected[channel])
         should_build = bool(raw_version) and (force or olivos_update)
-        full_only = False
         any_should_build = any_should_build or should_build
         outputs[f"{channel}_raw_version"] = raw_version
         outputs[f"{channel}_docker_tag"] = docker_tag
         outputs[f"{channel}_published_at"] = selected[channel]["published_at"]
         outputs[f"{channel}_should_build"] = github_bool(should_build)
-        outputs[f"{channel}_full_only"] = github_bool(full_only)
 
     outputs["any_should_build"] = github_bool(any_should_build)
     append_github_output(outputs)
 
-    print(json.dumps({"olivos": selected, "plugins": remote_plugins}, ensure_ascii=False, indent=2))
+    print(json.dumps({"olivos": selected}, ensure_ascii=False, indent=2))
     return outputs
 
 
 def load_plugins(path):
     path = Path(path)
-    if not path.exists():
-        return []
     with path.open(encoding="utf-8") as f:
         return json.load(f)
 
@@ -336,7 +233,6 @@ def main(argv=None):
     detect_parser.add_argument("--record", default="build-record.json")
     detect_parser.add_argument("--force", action="store_true")
     detect_parser.add_argument("--token", default=os.environ.get("GITHUB_TOKEN", ""))
-    detect_parser.add_argument("--opk", default="opk.txt")
 
     update_parser = subparsers.add_parser("update-record")
     update_parser.add_argument("--record", default="build-record.json")
@@ -348,9 +244,9 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
     if args.command == "detect":
-        detect(args.record, args.force, args.token, args.opk)
+        detect(args.record, args.force, args.token)
     elif args.command == "update-record":
-        update_record(args.record, args.raw_version, args.published_at, args.plugins, args.force)
+        update_record(args.record, args.channel, args.raw_version, args.published_at, args.plugins, args.force)
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0

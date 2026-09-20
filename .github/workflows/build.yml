@@ -37,12 +37,10 @@ jobs:
       stable_docker_tag: ${{ steps.release.outputs.stable_docker_tag }}
       stable_published_at: ${{ steps.release.outputs.stable_published_at }}
       stable_should_build: ${{ steps.release.outputs.stable_should_build }}
-      stable_full_only: ${{ steps.release.outputs.stable_full_only }}
       testing_raw_version: ${{ steps.release.outputs.testing_raw_version }}
       testing_docker_tag: ${{ steps.release.outputs.testing_docker_tag }}
       testing_published_at: ${{ steps.release.outputs.testing_published_at }}
       testing_should_build: ${{ steps.release.outputs.testing_should_build }}
-      testing_full_only: ${{ steps.release.outputs.testing_full_only }}
       any_should_build: ${{ steps.release.outputs.any_should_build }}
       dockerhub_enabled: ${{ steps.dockerhub_check.outputs.enabled }}
       force_build: ${{ steps.force.outputs.enabled }}
@@ -133,13 +131,8 @@ jobs:
         run: |
           if [ "${{ matrix.channel }}" = "stable" ]; then
             SHOULD_BUILD="${{ needs.check.outputs.stable_should_build }}"
-            FULL_ONLY="${{ needs.check.outputs.stable_full_only }}"
           else
             SHOULD_BUILD="${{ needs.check.outputs.testing_should_build }}"
-            FULL_ONLY="${{ needs.check.outputs.testing_full_only }}"
-          fi
-          if [ "${FULL_ONLY}" = "true" ] && [ "${{ matrix.build_type }}" != "full" ]; then
-            SHOULD_BUILD="false"
           fi
           echo "should_build=${SHOULD_BUILD}" >> "$GITHUB_OUTPUT"
 
@@ -182,6 +175,7 @@ jobs:
 
           echo "raw_version=${RAW_VERSION}" >> "$GITHUB_OUTPUT"
           echo "build_type=${{ matrix.build_type }}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${REPO_OWNER_LC}/olivos" >> "$GITHUB_OUTPUT"
           {
             echo "tags<<EOF"
             echo "ghcr.io/${REPO_OWNER_LC}/olivos:${VERSION_TAG}"
@@ -218,6 +212,7 @@ jobs:
 
       - name: Build and push image
         if: steps.channel.outputs.should_build == 'true'
+        id: image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -229,8 +224,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           provenance: false
           sbom: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          no-cache: ${{ needs.check.outputs.force_build == 'true' }}
+          pull: ${{ needs.check.outputs.force_build == 'true' }}
+          cache-from: type=gha,scope=${{ matrix.channel }}-${{ matrix.build_type }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.channel }}-${{ matrix.build_type }}
 
       - name: Verify multi-arch manifest
         if: steps.channel.outputs.should_build == 'true'
@@ -242,10 +239,43 @@ jobs:
             docker buildx imagetools inspect "$tag"
           done
 
+      - name: Verify and collect image plugin manifest
+        if: steps.channel.outputs.should_build == 'true' && matrix.build_type == 'full'
+        env:
+          IMAGE_REF: ${{ steps.meta.outputs.image }}@${{ steps.image.outputs.digest }}
+        run: |
+          for arch in amd64 arm64; do
+            docker run --rm --platform "linux/$arch" --entrypoint python "$IMAGE_REF" -c '
+          import hashlib, json
+          from pathlib import Path
+          root = Path("/opt/olivos/plugins")
+          text = (root / "manifest.json").read_text()
+          plugins = json.loads(text)
+          names = [plugin["name"] for plugin in plugins]
+          assert len(names) == len(set(names)), "Duplicate plugin names"
+          assert set(names) == {p.name for p in root.glob("*.opk")}, "Plugin inventory mismatch"
+          for plugin in plugins:
+              path = root / plugin["name"]
+              with path.open("rb") as file:
+                  assert hashlib.file_digest(file, "sha256").hexdigest() == plugin["sha256"], path
+          print(text, end="")
+          ' > "plugins-$arch.json"
+          done
+          cmp plugins-amd64.json plugins-arm64.json
+
+      - name: Upload image plugin manifest
+        if: steps.channel.outputs.should_build == 'true' && matrix.build_type == 'full'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugins-${{ matrix.channel }}
+          path: plugins-amd64.json
+          if-no-files-found: error
+          retention-days: 7
+
   record:
     runs-on: ubuntu-latest
     needs: [check, build]
-    if: needs.check.outputs.any_should_build == 'true'
+    if: needs.check.outputs.any_should_build == 'true' && needs.check.outputs.force_build != 'true'
     permissions:
       contents: write
 
@@ -255,27 +285,21 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Collect OPK plugin versions
-        env:
-          PLUGIN_DIR: ${{ runner.temp }}/olivos-opk
-        run: |
-          python3 download_plugins.py
+      - name: Download image plugin manifests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: plugins-*
+          path: manifests
 
       - name: Update local build record
         run: |
-          FORCE_ARG=""
-          if [ "${{ needs.check.outputs.force_build }}" = "true" ]; then
-            FORCE_ARG="--force"
-          fi
-
           if [ "${{ needs.check.outputs.stable_should_build }}" = "true" ]; then
             python3 scripts/build_metadata.py update-record \
               --record build-record.json \
               --channel stable \
               --raw-version "${{ needs.check.outputs.stable_raw_version }}" \
               --published-at "${{ needs.check.outputs.stable_published_at }}" \
-              --plugins downloaded-plugins.json \
-              $FORCE_ARG
+              --plugins manifests/plugins-stable/plugins-amd64.json
           fi
 
           if [ "${{ needs.check.outputs.testing_should_build }}" = "true" ]; then
@@ -284,12 +308,10 @@ jobs:
               --channel testing \
               --raw-version "${{ needs.check.outputs.testing_raw_version }}" \
               --published-at "${{ needs.check.outputs.testing_published_at }}" \
-              --plugins downloaded-plugins.json \
-              $FORCE_ARG
+              --plugins manifests/plugins-testing/plugins-amd64.json
           fi
 
       - name: Commit build record
-        if: needs.check.outputs.force_build != 'true'
         run: |
           if git diff --quiet -- build-record.json; then
             echo "No build record changes to commit."

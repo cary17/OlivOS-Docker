@@ -1,6 +1,8 @@
 # OlivOS Docker
 
-自动跟踪上游 [OlivOS](https://github.com/OlivOS-Team/OlivOS) Release，构建并发布多架构 Docker 镜像。工作流每 12 小时检查一次正式版、测试版和预装 OPK 插件是否更新。
+自动跟踪上游 [OlivOS](https://github.com/OlivOS-Team/OlivOS) Release，构建并发布多架构 Docker 镜像。工作流每 12 小时检查一次正式版和测试版；只有核心版本更新或手动强制构建才触发镜像构建，插件更新不会单独触发构建。
+
+full 镜像在构建时获取插件，并包含仓库 `opk/` 下的本地插件。两个架构共享插件构建阶段；发布后按镜像 digest 校验插件文件、SHA-256 和双架构清单一致性，再用实际镜像清单更新 `build-record.json`，不重新下载插件来生成记录。
 
 ## 支持架构
 
@@ -22,7 +24,7 @@
 | core | `latest-core` | `testing-core` | 仅 OlivOS 核心，不预装 OPK |
 | dev | `latest-dev` | `testing-dev` | 核心版加调试工具 |
 
-每个上游版本还会发布不可移动的具体版本标签：
+每个上游版本还会发布具体版本标签（允许同版本重新构建覆盖，并非不可变标签）：
 
 ```text
 v0.11.81
@@ -31,6 +33,8 @@ v0.11.81-dev
 ```
 
 `latest` 系列只指向正式版，Pre-release 只更新 `testing` 系列和对应具体版本标签。
+
+手动运行构建工作流时，`force_channel` 可选择 `stable`、`testing` 或 `both`。强制构建会跳过构建缓存并拉取基础镜像，重新获取插件；仍保留“不更新 `build-record.json`”的行为。需要固定到完全相同的镜像内容时，请使用 `image@sha256:...` 而非标签。
 
 ## 快速开始
 
@@ -75,6 +79,10 @@ docker compose logs -f olivos
 |---|---|---|
 | `/opt/olivos/conf` | `/app/OlivOS/conf` | OlivOS 配置和账号信息 |
 | `/opt/olivos/plugin` | `/app/OlivOS/plugin` | 插件和插件数据 |
+
+full 镜像的内置插件与清单位于 `/opt/olivos/plugins`，不会被上述挂载遮蔽。启动时只向 `plugin/app/` 补充缺失的 OPK；已有同名 OPK、同名解包目录或符号链接均保留，不覆盖用户版本。core/dev 镜像不补充插件。
+
+更新镜像不会自动替换持久化目录中已有的插件。需要换用镜像内置版本时，先备份并移走对应的同名 OPK/解包目录，再重启容器；单纯删除内置 OPK 会在下次启动时重新补充。旧镜像没有 `/opt/olivos/plugins` 时，派生镜像入口会跳过初始化。
 
 ## 切换官方镜像版本
 
@@ -253,7 +261,7 @@ docker compose \
   up -d --build
 ```
 
-这一方法同样不需要 GitHub 登录或仓库写入权限，只需要能够读取公开的 Raw 文件和基础镜像。
+这一方法同样不需要 GitHub 登录或仓库写权限，只需要能够读取公开的 Raw 文件和基础镜像。
 
 ### 方法三：不使用 Compose，直接构建
 
