@@ -6,3 +6,4 @@ OlivaDiceMaster.opk：https://github.com/OlivOS-Team/OlivaDiceMaster/releases
 OlivaDiceJoy.opk：https://github.com/OlivOS-Team/OlivaDiceJoy/releases
 ChanceCustom.opk：https://github.com/OlivOS-Team/ChanceCustom/releases
 OlivaDiceWebUI.opk：https://github.com/ShiaNyaa/OlivaDiceWebUI/releases
+OlivaDiceWebUIStandalone.opk：https://github.com/ShiaNyaa/OlivaDiceWebUI/releases
