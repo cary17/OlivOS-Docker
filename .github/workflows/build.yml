@@ -244,8 +244,14 @@ jobs:
         env:
           IMAGE_REF: ${{ steps.meta.outputs.image }}@${{ steps.image.outputs.digest }}
         run: |
+          docker buildx imagetools inspect --raw "$IMAGE_REF" > image-index.json
           for arch in amd64 arm64; do
-            docker run --rm --platform "linux/$arch" --entrypoint python "$IMAGE_REF" -c '
+            digest=$(jq -er --arg arch "$arch" '
+              [.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch)]
+              | if length == 1 then .[0].digest else error("Expected exactly one Linux manifest for " + $arch) end
+            ' image-index.json)
+            PLATFORM_REF="${IMAGE_REF%@*}@$digest"
+            docker run --rm --platform "linux/$arch" --entrypoint python "$PLATFORM_REF" -c '
           import hashlib, json
           from pathlib import Path
           root = Path("/opt/olivos/plugins")

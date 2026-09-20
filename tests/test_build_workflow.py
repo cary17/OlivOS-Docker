@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -37,7 +38,7 @@ class WorkflowDispatchTests(unittest.TestCase):
 
     def test_image_verifier_accepts_exact_inventory_and_rejects_corruption(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        code = workflow.split("--entrypoint python \"$IMAGE_REF\" -c '\n", 1)[1]
+        code = workflow.split("--entrypoint python \"$PLATFORM_REF\" -c '\n", 1)[1]
         code = textwrap.dedent(code.split("\n          ' >", 1)[0])
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -55,6 +56,41 @@ class WorkflowDispatchTests(unittest.TestCase):
             plugin.unlink()
             result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
+
+    def test_each_architecture_uses_its_child_digest(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        step = workflow.split('      - name: Verify and collect image plugin manifest\n', 1)[1]
+        command = textwrap.dedent(step.split('        run: |\n', 1)[1].split('\n      - name:', 1)[0])
+        index = {'manifests': [
+            {'platform': {'os': 'linux', 'architecture': arch}, 'digest': 'sha256:' + char * 64}
+            for arch, char in [('arm64', 'b'), ('amd64', 'a')]
+        ]}
+        mock_docker = '''docker() {
+          if [ "$1" = buildx ]; then
+            printf '%s' "$INDEX"
+          else
+            printf '%s\\n' "$*" >> "$CALLS"
+            printf '[]\\n'
+          fi
+        }
+        '''
+        with tempfile.TemporaryDirectory() as tmp:
+            calls = Path(tmp) / 'calls'
+            env = dict(os.environ, IMAGE_REF='example.com/olivos@sha256:' + 'c' * 64,
+                       INDEX=json.dumps(index), CALLS=str(calls))
+            result = subprocess.run(['bash', '-e', '-c', mock_docker + command], cwd=tmp,
+                                    env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            recorded = calls.read_text()
+            for arch, char in [('amd64', 'a'), ('arm64', 'b')]:
+                self.assertIn(f'--platform linux/{arch} --entrypoint python example.com/olivos@sha256:{char * 64}', recorded)
+            self.assertNotIn(env['IMAGE_REF'], recorded)
+            for manifests in (index['manifests'][:1], index['manifests'] * 2):
+                with self.subTest(manifests=manifests):
+                    result = subprocess.run(['bash', '-e', '-c', mock_docker + command], cwd=tmp,
+                                            env=dict(env, INDEX=json.dumps({'manifests': manifests})),
+                                            capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0)
 
 if __name__ == "__main__":
     unittest.main()
