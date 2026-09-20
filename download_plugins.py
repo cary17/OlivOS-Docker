@@ -149,17 +149,22 @@ def normalize_release_zip(path):
     return validate_opk(path)
 
 
-def select_release_asset(release):
+def select_release_asset(release, name):
     assets = release.get('assets', [])
-    return next(
-        (item for item in assets if item.get('name', '').endswith('.opk')),
-        next((item for item in assets if item.get('name', '').endswith('.zip')), None),
-    )
+    for asset in assets:
+        if asset.get('name') == name:
+            return asset
+    if any(asset.get('name', '').endswith('.opk') for asset in assets):
+        return None
+    archives = [asset for asset in assets if asset.get('name', '').endswith('.zip')]
+    return next((asset for asset in archives if asset['name'] == Path(name).with_suffix('.zip').name),
+                archives[0] if len(archives) == 1 else None)
 
 
 def download_plugins(opk_path='opk.txt', token='', local_dir='opk_local'):
     PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
     manifest = []
+    releases = {}
     with Path(opk_path).open(encoding='utf-8') as file:
         for line_number, line in enumerate(file, 1):
             parsed = parse_manifest_line(line)
@@ -167,10 +172,12 @@ def download_plugins(opk_path='opk.txt', token='', local_dir='opk_local'):
                 continue
             name, repo = parsed
             api = f'https://api.github.com/repos/{repo}/releases/latest'
-            release = request_json(api, token)
-            asset = select_release_asset(release)
+            if repo not in releases:
+                releases[repo] = request_json(api, token)
+            release = releases[repo]
+            asset = select_release_asset(release, name)
             if asset is None:
-                raise RuntimeError(f'No OPK or single-plugin ZIP asset found for {repo} (manifest line {line_number})')
+                raise RuntimeError(f'No matching asset for {name} in {repo} (manifest line {line_number})')
             asset_name = asset['name']
             destination = PLUGIN_DIR / name
             print(f"Downloading {name} ← {asset['browser_download_url']}")
