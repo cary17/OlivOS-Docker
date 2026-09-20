@@ -10,6 +10,17 @@ import download_plugins
 
 
 class OpkValidationTests(unittest.TestCase):
+    def test_manifest_parser_rejects_invalid_sources(self):
+        for line in ('bad.opk:https://example.com/owner/repo', 'not a manifest entry'):
+            with self.subTest(line=line), self.assertRaises(ValueError):
+                download_plugins.parse_manifest_line(line)
+
+    def test_asset_selection_prefers_opk_and_falls_back_to_zip(self):
+        zip_asset = {'name': 'demo.zip', 'id': 1}
+        opk_asset = {'name': 'demo.opk', 'id': 2}
+        self.assertEqual(download_plugins.select_release_asset({'assets': [zip_asset]}), zip_asset)
+        self.assertEqual(download_plugins.select_release_asset({'assets': [zip_asset, opk_asset]}), opk_asset)
+
     def test_validate_opk_requires_native_entry_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'broken.opk'
@@ -57,6 +68,46 @@ class OpkValidationTests(unittest.TestCase):
 
 
 class DownloadTests(unittest.TestCase):
+    def test_local_override_manifest_matches_installed_bytes_and_copy_errors_propagate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            local = root / 'local'
+            local.mkdir()
+            source = local / 'demo.opk'
+            with zipfile.ZipFile(source, 'w') as archive:
+                archive.writestr('app.json', json.dumps({'namespace': 'demo', 'version': 'local'}))
+                archive.writestr('__init__.py', '')
+                archive.writestr('main.py', '')
+            opk_list = root / 'opk.txt'
+            opk_list.write_text('demo.opk:https://github.com/owner/repo\n')
+            output = root / 'installed'
+            manifest = root / 'manifest.json'
+            release = {'tag_name': 'remote', 'assets': [
+                {'name': 'demo.opk', 'browser_download_url': 'https://example.com/demo.opk'}
+            ]}
+
+            def fake_download(url, destination, validator):
+                destination.write_bytes(source.read_bytes())
+                validator(destination)
+
+            with (
+                mock.patch.object(download_plugins, 'PLUGIN_DIR', output),
+                mock.patch.object(download_plugins, 'MANIFEST_PATH', manifest),
+                mock.patch.object(download_plugins, 'request_json', return_value=release),
+                mock.patch.object(download_plugins, 'download_file', side_effect=fake_download),
+            ):
+                result = download_plugins.download_plugins(opk_list, local_dir=local)
+                self.assertEqual(len(result), 1)
+                self.assertEqual(result[0]['source'], 'local')
+                self.assertEqual(result[0]['version'], 'local')
+                self.assertEqual(result[0]['sha256'], download_plugins.sha256_file(output / 'demo.opk'))
+                self.assertEqual(json.loads(manifest.read_text()), result)
+                manifest.unlink()
+                with mock.patch.object(download_plugins.shutil, 'copyfile', side_effect=OSError('copy failed')):
+                    with self.assertRaises(OSError):
+                        download_plugins.download_plugins(opk_list, local_dir=local)
+                self.assertFalse(manifest.exists())
+
     def test_download_file_retries_and_atomically_replaces_destination(self):
         with tempfile.TemporaryDirectory() as tmp:
             destination = Path(tmp) / 'plugin.opk'

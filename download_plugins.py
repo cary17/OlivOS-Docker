@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import shutil
 import time
 import urllib.error
 import urllib.request
@@ -156,7 +157,7 @@ def select_release_asset(release):
     )
 
 
-def download_plugins(opk_path='opk.txt', token=''):
+def download_plugins(opk_path='opk.txt', token='', local_dir='opk_local'):
     PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
     manifest = []
     with Path(opk_path).open(encoding='utf-8') as file:
@@ -192,6 +193,18 @@ def download_plugins(opk_path='opk.txt', token=''):
                     'namespace': app['namespace'],
                 }
             )
+    for source in sorted(Path(local_dir).rglob('*.opk')):
+        app = validate_opk(source)
+        destination = PLUGIN_DIR / source.name
+        shutil.copyfile(source, destination)
+        manifest = [item for item in manifest if item['name'] != source.name]
+        manifest.append({
+            'name': source.name,
+            'source': 'local',
+            'version': app.get('version', ''),
+            'namespace': app['namespace'],
+            'sha256': sha256_file(destination),
+        })
     MANIFEST_PATH.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + '\n',
         encoding='utf-8',

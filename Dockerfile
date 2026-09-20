@@ -1,3 +1,23 @@
+# 插件与 CPU 架构无关，多架构构建共享同一份下载产物。
+FROM --platform=$BUILDPLATFORM python:3.11-slim AS plugins
+RUN printf 'precedence ::ffff:0:0/96  100\n' >> /etc/gai.conf
+
+ARG BUILD_TYPE=full
+ARG OLIVOS_RAW_VERSION
+WORKDIR /build
+COPY opk.txt download_plugins.py ./
+COPY opk/ ./opk_local/
+ENV PLUGIN_DIR=/opt/olivos/plugins
+ENV PLUGIN_MANIFEST=/opt/olivos/plugins/manifest.json
+RUN set -eu; \
+    echo "Preparing plugins for ${OLIVOS_RAW_VERSION}"; \
+    mkdir -p "$PLUGIN_DIR"; \
+    if [ "$BUILD_TYPE" = "full" ]; then \
+        python download_plugins.py; \
+    else \
+        printf '[]\n' > "$PLUGIN_MANIFEST"; \
+    fi
+
 # ==================== 构建阶段 ====================
 FROM python:3.11-slim AS builder
 
@@ -46,26 +66,6 @@ RUN if [ "$BUILD_TYPE" = "dev" ]; then \
         pip install --no-cache-dir .[dev]; \
     fi
 
-# 回到上级目录
-WORKDIR /app
-
-COPY opk.txt download_plugins.py ./
-COPY opk/ ./opk_local/
-
-# 下载 OPK 插件（仅 full 版本）
-RUN if [ "$BUILD_TYPE" = "full" ]; then \
-        echo "=== Downloading OPK plugins ===" && \
-        python download_plugins.py && \
-        rm download_plugins.py opk.txt && \
-        if [ -d ./opk_local ]; then \
-            find ./opk_local -name '*.opk' -exec cp {} OlivOS/plugin/app/ \; ; \
-        fi; \
-        rm -rf ./opk_local; \
-    else \
-        rm -f download_plugins.py opk.txt && \
-        rm -rf ./opk_local; \
-    fi
-
 # 清理不必要的文件，减小镜像体积
 RUN rm -rf /root/.cache/pip && \
     # 清理 Python 字节码和构建元数据，不递归删除第三方包的数据文件
@@ -96,6 +96,7 @@ COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/pytho
 
 # 复制源码
 COPY --from=builder /app/OlivOS /app/OlivOS
+COPY --from=plugins /opt/olivos/plugins /opt/olivos/plugins
 
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1

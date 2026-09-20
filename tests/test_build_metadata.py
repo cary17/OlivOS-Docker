@@ -84,12 +84,6 @@ class VersionComparisonTests(unittest.TestCase):
 
 
 class PluginComparisonTests(unittest.TestCase):
-    def test_zip_release_asset_is_used_when_opk_is_absent(self):
-        asset = build_metadata.select_plugin_asset({'assets': [{'name': 'OlivaDiceWebUI.zip', 'id': 1}]})
-
-        self.assertIsNotNone(asset)
-        self.assertEqual(asset['name'], 'OlivaDiceWebUI.zip')
-
     def test_plugin_updates_do_not_trigger_build(self):
         releases = [
             {"tag_name": "0.11.81", "draft": False, "prerelease": False, "published_at": "2026-01-02T00:00:00Z"},
@@ -99,20 +93,34 @@ class PluginComparisonTests(unittest.TestCase):
             "stable": {"olivos_version": "0.11.81", "olivos_published_at": "2026-01-02 08:00:00 +0800"},
             "testing": {"olivos_version": "0.11.81-rc.1", "olivos_published_at": "2026-01-02 08:00:00 +0800"},
         }
-        plugins = [{"name": "OlivaDiceWebUI.opk", "version": "new-release", "asset_id": 2}]
-
         with (
-            mock.patch("scripts.build_metadata.fetch_releases", return_value=releases),
-            mock.patch("scripts.build_metadata.fetch_plugin_metadata", return_value=plugins),
+            mock.patch("scripts.build_metadata.request_json", return_value=releases) as request,
             mock.patch("scripts.build_metadata.load_record", return_value=record),
         ):
             outputs = build_metadata.detect("ignored.json")
 
         self.assertEqual(outputs["stable_should_build"], "false")
         self.assertEqual(outputs["testing_should_build"], "false")
+        request.assert_called_once_with(build_metadata.RELEASES_API, "")
+        self.assertFalse(any("full_only" in key for key in outputs))
+
+    def test_core_detection_only_queries_core_release_api(self):
+        releases = [{"tag_name": "0.11.82", "prerelease": False, "draft": False}]
+        with mock.patch("scripts.build_metadata.request_json", return_value=releases) as request:
+            with mock.patch("scripts.build_metadata.load_record", return_value={}):
+                outputs = build_metadata.detect("ignored.json")
+        self.assertEqual(outputs["stable_should_build"], "true")
+        request.assert_called_once_with(build_metadata.RELEASES_API, "")
 
 
 class RecordUpdateTests(unittest.TestCase):
+    def test_missing_manifest_does_not_write_record(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record = Path(tmp) / "record.json"
+            with self.assertRaises(FileNotFoundError):
+                build_metadata.update_record(record, "stable", "1.0", "", Path(tmp) / "missing.json")
+            self.assertFalse(record.exists())
+
     def test_update_record_writes_channel_version_and_plugins(self):
         with tempfile.TemporaryDirectory() as tmp:
             record_path = Path(tmp) / "build-record.json"
@@ -192,16 +200,6 @@ class ReleaseSelectionTests(unittest.TestCase):
         self.assertEqual(selected["testing"]["raw_version"], "0.11.82-rc.1")
         self.assertEqual(selected["testing"]["docker_tag"], "v0.11.82-rc.1")
         self.assertEqual(selected["testing"]["published_at"], "2026-01-02 08:00:00 +0800")
-
-
-class OpkParsingTests(unittest.TestCase):
-    def test_parse_opk_line_rejects_non_github_repository(self):
-        with self.assertRaises(ValueError):
-            build_metadata.parse_opk_line("bad.opk：https://example.com/owner/repo")
-
-    def test_parse_opk_line_rejects_missing_separator(self):
-        with self.assertRaises(ValueError):
-            build_metadata.parse_opk_line("not a manifest entry")
 
 
 class NetworkRequestTests(unittest.TestCase):
