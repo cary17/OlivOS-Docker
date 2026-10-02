@@ -34,7 +34,7 @@ v0.11.81-dev
 
 `latest` 系列只指向正式版，Pre-release 只更新 `testing` 系列和对应具体版本标签。
 
-手动运行构建工作流时，`force_channel` 可选择 `stable`、`testing` 或 `both`。强制构建会跳过构建缓存并拉取基础镜像，重新获取插件；仍保留“不更新 `build-record.json`”的行为。需要固定到完全相同的镜像内容时，请使用 `image@sha256:...` 而非标签。
+手动运行构建工作流时，`force_channel` 可选择 `stable`、`testing` 或 `both`。选中渠道没有可用 Release 时会在构建前报错，不使用空版本构建。强制构建会跳过构建缓存并拉取基础镜像，重新获取插件；仍保留“不更新 `build-record.json`”的行为。需要固定到完全相同的镜像内容时，请使用 `image@sha256:...` 而非标签。
 
 ## 快速开始
 
@@ -377,16 +377,13 @@ docker inspect olivos --format '{{.Config.Image}}'
 docker run --rm --entrypoint python olivos-custom:latest -m pip list
 ```
 
-## 脚本安装
+## 本地检查
 
-国外网络：
-
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/cary17/OlivOS-Docker/main/OlivOS.sh)"
-```
-
-国内网络：
+以下检查不构建镜像，也不启动容器：
 
 ```bash
-bash -c "$(curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/cary17/OlivOS-Docker/main/OlivOS.sh)"
+python3 -B -m unittest discover -s tests -v
+sh -n entrypoint.sh download_source.sh
+docker compose config --quiet
+docker compose -f docker-compose.yml -f docker-compose.extra.yml config --quiet
 ```

@@ -82,16 +82,26 @@ jobs:
         run: |
           python3 scripts/build_metadata.py detect --record build-record.json
           if [ "${{ steps.force.outputs.enabled }}" = "true" ]; then
+            require_version() {
+              if ! grep -Eq "^${1}_raw_version=.+$" "$GITHUB_OUTPUT"; then
+                echo "No release available for forced channel: $1" >&2
+                exit 1
+              fi
+            }
             case "${{ steps.force.outputs.channel }}" in
               stable)
+                require_version stable
                 echo "stable_should_build=true" >> "$GITHUB_OUTPUT"
                 echo "testing_should_build=false" >> "$GITHUB_OUTPUT"
                 ;;
               testing)
+                require_version testing
                 echo "stable_should_build=false" >> "$GITHUB_OUTPUT"
                 echo "testing_should_build=true" >> "$GITHUB_OUTPUT"
                 ;;
               both)
+                require_version stable
+                require_version testing
                 echo "stable_should_build=true" >> "$GITHUB_OUTPUT"
                 echo "testing_should_build=true" >> "$GITHUB_OUTPUT"
                 ;;
