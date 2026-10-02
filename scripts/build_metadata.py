@@ -31,10 +31,11 @@ def version_key(version):
     match = re.fullmatch(r"([A-Za-z]+)[.-]?(\d*)", suffix)
     if match:
         label = match.group(1).lower()
+        number = int(match.group(2) or 0)
         if label in PRERELEASE_ORDER:
-            number = int(match.group(2) or 0)
-            return release, (0, PRERELEASE_ORDER[label], number)
-    return release, (0, -1, suffix)
+            return release, (0, PRERELEASE_ORDER[label], "", number, "")
+        return release, (0, -1, label, number, suffix)
+    return release, (0, -1, suffix, 0, suffix)
 
 
 def parse_time(value):

@@ -20,6 +20,20 @@ class VersionComparisonTests(unittest.TestCase):
         self.assertLess(build_metadata.version_key("1.0-42"),
                         build_metadata.version_key("1.0-custom.1"))
 
+    def test_unknown_prerelease_labels_compare_numbers_without_mixed_types(self):
+        self.assertLess(build_metadata.version_key("1.0-preview.2"),
+                        build_metadata.version_key("1.0-preview.10"))
+        self.assertLess(build_metadata.version_key("1.0-preview"),
+                        build_metadata.version_key("1.0-preview.10"))
+        structured = build_metadata.version_key("1.0-preview.10")
+        for suffix in ("preview.10-extra", "42", "custom.anything", "preview"):
+            with self.subTest(suffix=suffix):
+                unstructured = build_metadata.version_key(f"1.0-{suffix}")
+                self.assertEqual(len(structured[1]), len(unstructured[1]))
+                self.assertEqual(tuple(map(type, structured[1])), tuple(map(type, unstructured[1])))
+                self.assertNotEqual(structured, unstructured)
+                self.assertEqual(structured < unstructured, unstructured > structured)
+
     def test_legacy_naive_time_is_interpreted_as_beijing_time(self):
         self.assertEqual(build_metadata.parse_time("2026-01-02 08:00:00"),
                          build_metadata.parse_time("2026-01-02T00:00:00Z"))
