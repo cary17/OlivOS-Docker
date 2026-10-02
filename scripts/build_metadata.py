@@ -28,11 +28,12 @@ def version_key(version):
     release = tuple(int(part) if part.isdigit() else 0 for part in main.split("."))
     if not separator:
         return release, (1,)
-    match = re.match(r"([A-Za-z]+)[.-]?(\d*)", suffix)
+    match = re.fullmatch(r"([A-Za-z]+)[.-]?(\d*)", suffix)
     if match:
         label = match.group(1).lower()
-        number = int(match.group(2) or 0)
-        return release, (0, PRERELEASE_ORDER.get(label, -1), label, number, suffix)
+        if label in PRERELEASE_ORDER:
+            number = int(match.group(2) or 0)
+            return release, (0, PRERELEASE_ORDER[label], number)
     return release, (0, -1, suffix)
 
 
@@ -42,8 +43,10 @@ def parse_time(value):
     value = value.strip()
     try:
         if value.endswith("Z"):
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return datetime.fromisoformat(value)
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        else:
+            dt = datetime.fromisoformat(value)
+        return dt.replace(tzinfo=BEIJING_TZ) if dt.tzinfo is None else dt
     except ValueError:
         return None
 
@@ -159,7 +162,14 @@ def request_json(url, token="", retries=REQUEST_RETRIES):
 
 
 def fetch_releases(token):
-    return request_json(RELEASES_API, token)
+    releases = []
+    page = 1
+    while True:
+        batch = request_json(f"{RELEASES_API}?per_page=100&page={page}", token)
+        releases.extend(batch)
+        if len(batch) < 100:
+            return releases
+        page += 1
 
 
 def github_bool(value):

@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import time
 import urllib.error
@@ -34,10 +35,22 @@ def parse_manifest_line(line):
         raise ValueError(f'Invalid OPK manifest entry: {line}')
     name, url = (part.strip() for part in line.split(separator, 1))
     prefix = 'https://github.com/'
-    if not name.endswith('.opk') or not url.startswith(prefix):
+    if (
+        not name.endswith('.opk')
+        or name == '.opk'
+        or '/' in name
+        or '\\' in name
+        or ':' in name
+        or any(ord(char) < 32 or ord(char) == 127 for char in name)
+        or not url.startswith(prefix)
+    ):
         raise ValueError(f'Invalid OPK manifest entry: {line}')
-    repo = url.removeprefix(prefix).rstrip('/').removesuffix('/releases')
-    if len(repo.split('/')) != 2:
+    repo = url.removeprefix(prefix).removesuffix('/').removesuffix('/releases')
+    parts = repo.split('/')
+    if len(parts) != 2 or any(
+        part in ('', '.', '..') or re.fullmatch(r'[A-Za-z0-9_.-]+', part) is None
+        for part in parts
+    ):
         raise ValueError(f'Invalid GitHub repository: {repo}')
     return name, repo
 
@@ -99,9 +112,28 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
+def validate_zip_members(archive):
+    seen = set()
+    for info in archive.infolist():
+        name = info.filename
+        member = name[:-1] if info.is_dir() else name
+        if (
+            not member
+            or '\\' in name
+            or ':' in name
+            or any(ord(char) < 32 or ord(char) == 127 for char in name)
+            or any(part in ('', '.', '..') for part in member.split('/'))
+        ):
+            raise ValueError(f'Invalid ZIP member path: {name}')
+        if member in seen:
+            raise ValueError(f'Duplicate ZIP member: {name}')
+        seen.add(member)
+
+
 def validate_opk(path):
     try:
         with zipfile.ZipFile(path) as archive:
+            validate_zip_members(archive)
             names = set(archive.namelist())
             missing = REQUIRED_OPK_FILES - names
             if missing:
@@ -111,8 +143,9 @@ def validate_opk(path):
             app = json.loads(archive.read('app.json'))
     except (zipfile.BadZipFile, json.JSONDecodeError) as exc:
         raise ValueError(f'Invalid OPK archive: {path}') from exc
-    if not isinstance(app, dict) or not app.get('namespace'):
-        raise ValueError('OPK app.json must contain a namespace')
+    namespace = app.get('namespace') if isinstance(app, dict) else None
+    if not isinstance(namespace, str) or not namespace.strip():
+        raise ValueError('OPK app.json must contain a non-empty string namespace')
     return app
 
 
@@ -120,13 +153,16 @@ def normalize_release_zip(path):
     path = Path(path)
     try:
         with zipfile.ZipFile(path) as archive:
+            validate_zip_members(archive)
             names = archive.namelist()
-            roots = {name.split('/', 1)[0] for name in names if name and '/' in name}
-            if len(roots) != 1:
-                raise ValueError('Release ZIP must contain exactly one plugin directory')
-            prefix = roots.pop() + '/'
-            if any(not name.startswith(prefix) for name in names if name):
-                raise ValueError('Release ZIP contains files outside its plugin directory')
+            prefix = ''
+            if not REQUIRED_OPK_FILES.issubset(names):
+                roots = {name.split('/', 1)[0] for name in names if '/' in name}
+                if len(roots) != 1:
+                    raise ValueError('Release ZIP must contain exactly one plugin directory')
+                prefix = roots.pop() + '/'
+                if any(not name.startswith(prefix) for name in names):
+                    raise ValueError('Release ZIP contains files outside its plugin directory')
             stripped = {name.removeprefix(prefix) for name in names if not name.endswith('/')}
             missing = REQUIRED_OPK_FILES - stripped
             if missing:
@@ -139,7 +175,7 @@ def normalize_release_zip(path):
                     if info.is_dir():
                         continue
                     name = info.filename.removeprefix(prefix)
-                    output.writestr(name, archive.read(info.filename))
+                    output.writestr(name, archive.read(info))
         os.replace(temporary, path)
     except zipfile.BadZipFile as exc:
         raise ValueError(f'Invalid Release ZIP archive: {path}') from exc
@@ -162,44 +198,51 @@ def select_release_asset(release, name):
 
 
 def download_plugins(opk_path='opk.txt', token='', local_dir='opk_local'):
-    PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
     manifest = []
     releases = {}
+    entries = []
+    names = set()
     with Path(opk_path).open(encoding='utf-8') as file:
         for line_number, line in enumerate(file, 1):
             parsed = parse_manifest_line(line)
             if parsed is None:
                 continue
             name, repo = parsed
-            api = f'https://api.github.com/repos/{repo}/releases/latest'
-            if repo not in releases:
-                releases[repo] = request_json(api, token)
-            release = releases[repo]
-            asset = select_release_asset(release, name)
-            if asset is None:
-                raise RuntimeError(f'No matching asset for {name} in {repo} (manifest line {line_number})')
-            asset_name = asset['name']
-            destination = PLUGIN_DIR / name
-            print(f"Downloading {name} ← {asset['browser_download_url']}")
-            app = None
+            if name in names:
+                raise ValueError(f'Duplicate OPK manifest name: {name} (manifest line {line_number})')
+            names.add(name)
+            entries.append((line_number, name, repo))
+    PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
+    for line_number, name, repo in entries:
+        api = f'https://api.github.com/repos/{repo}/releases/latest'
+        if repo not in releases:
+            releases[repo] = request_json(api, token)
+        release = releases[repo]
+        asset = select_release_asset(release, name)
+        if asset is None:
+            raise RuntimeError(f'No matching asset for {name} in {repo} (manifest line {line_number})')
+        asset_name = asset['name']
+        destination = PLUGIN_DIR / name
+        print(f"Downloading {name} ← {asset['browser_download_url']}")
+        app = None
 
-            def validate_download(path):
-                nonlocal app
-                app = normalize_release_zip(path) if asset_name.endswith('.zip') else validate_opk(path)
+        def validate_download(path):
+            nonlocal app
+            app = normalize_release_zip(path) if asset_name.endswith('.zip') else validate_opk(path)
 
-            download_file(asset['browser_download_url'], destination, validator=validate_download)
-            manifest.append(
-                {
-                    'name': name,
-                    'repo': repo,
-                    'version': release.get('tag_name') or release.get('name') or '',
-                    'published_at': beijing_time(release.get('published_at')),
-                    'asset': asset['name'],
-                    'asset_id': asset.get('id'),
-                    'sha256': sha256_file(destination),
-                    'namespace': app['namespace'],
-                }
-            )
+        download_file(asset['browser_download_url'], destination, validator=validate_download)
+        manifest.append(
+            {
+                'name': name,
+                'repo': repo,
+                'version': release.get('tag_name') or release.get('name') or '',
+                'published_at': beijing_time(release.get('published_at')),
+                'asset': asset['name'],
+                'asset_id': asset.get('id'),
+                'sha256': sha256_file(destination),
+                'namespace': app['namespace'],
+            }
+        )
     for source in sorted(Path(local_dir).rglob('*.opk')):
         app = validate_opk(source)
         destination = PLUGIN_DIR / source.name

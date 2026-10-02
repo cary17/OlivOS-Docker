@@ -8,6 +8,25 @@ from scripts import build_metadata
 
 
 class VersionComparisonTests(unittest.TestCase):
+    def test_prerelease_aliases_share_rank_and_compare_numbers(self):
+        for label, alias in (("alpha", "a"), ("beta", "b")):
+            with self.subTest(label=label):
+                self.assertEqual(build_metadata.version_key(f"1.0-{label}.1"),
+                                 build_metadata.version_key(f"1.0-{alias}.1"))
+                self.assertLess(build_metadata.version_key(f"1.0-{label}.2"),
+                                build_metadata.version_key(f"1.0-{alias}.10"))
+        self.assertLess(build_metadata.version_key("1.0-custom.1"),
+                        build_metadata.version_key("1.0-dev.1"))
+        self.assertLess(build_metadata.version_key("1.0-42"),
+                        build_metadata.version_key("1.0-custom.1"))
+
+    def test_legacy_naive_time_is_interpreted_as_beijing_time(self):
+        self.assertEqual(build_metadata.parse_time("2026-01-02 08:00:00"),
+                         build_metadata.parse_time("2026-01-02T00:00:00Z"))
+        self.assertFalse(build_metadata.time_newer("2026-01-02T00:00:00Z", "2026-01-02 08:00:00"))
+        self.assertTrue(build_metadata.time_newer("2026-01-02T00:00:01Z", "2026-01-02 08:00:00"))
+        self.assertTrue(build_metadata.time_newer("2026-01-02 08:00:01", "2026-01-02T00:00:00Z"))
+
     def test_final_release_is_newer_than_prerelease(self):
         self.assertGreater(
             build_metadata.version_key("0.11.90"),
@@ -101,7 +120,7 @@ class PluginComparisonTests(unittest.TestCase):
 
         self.assertEqual(outputs["stable_should_build"], "false")
         self.assertEqual(outputs["testing_should_build"], "false")
-        request.assert_called_once_with(build_metadata.RELEASES_API, "")
+        request.assert_called_once_with(f"{build_metadata.RELEASES_API}?per_page=100&page=1", "")
         self.assertFalse(any("full_only" in key for key in outputs))
 
     def test_core_detection_only_queries_core_release_api(self):
@@ -110,7 +129,7 @@ class PluginComparisonTests(unittest.TestCase):
             with mock.patch("scripts.build_metadata.load_record", return_value={}):
                 outputs = build_metadata.detect("ignored.json")
         self.assertEqual(outputs["stable_should_build"], "true")
-        request.assert_called_once_with(build_metadata.RELEASES_API, "")
+        request.assert_called_once_with(f"{build_metadata.RELEASES_API}?per_page=100&page=1", "")
 
 
 class RecordUpdateTests(unittest.TestCase):
@@ -203,6 +222,28 @@ class ReleaseSelectionTests(unittest.TestCase):
 
 
 class NetworkRequestTests(unittest.TestCase):
+    def test_fetch_releases_includes_channel_from_second_page(self):
+        testing = {"tag_name": "0.11.90-rc.1", "prerelease": True, "draft": False}
+        stable = {"tag_name": "0.11.81", "prerelease": False, "draft": False}
+        with mock.patch("scripts.build_metadata.request_json", side_effect=[[testing] * 100, [stable]]) as request:
+            releases = build_metadata.fetch_releases("token")
+        self.assertEqual(len(releases), 101)
+        selected = build_metadata.select_latest_releases(releases)
+        self.assertEqual(selected["stable"]["raw_version"], "0.11.81")
+        self.assertEqual(selected["testing"]["raw_version"], "0.11.90-rc.1")
+        self.assertEqual(request.call_args_list, [
+            mock.call(f"{build_metadata.RELEASES_API}?per_page=100&page=1", "token"),
+            mock.call(f"{build_metadata.RELEASES_API}?per_page=100&page=2", "token"),
+        ])
+
+    def test_fetch_releases_stops_at_empty_page(self):
+        with mock.patch("scripts.build_metadata.request_json", side_effect=[[{}] * 100, []]) as request:
+            self.assertEqual(len(build_metadata.fetch_releases("")), 100)
+        self.assertEqual(request.call_count, 2)
+        with mock.patch("scripts.build_metadata.request_json", return_value=[]) as request:
+            self.assertEqual(build_metadata.fetch_releases(""), [])
+        self.assertEqual(request.call_count, 1)
+
     def test_request_json_retries_temporary_network_failure(self):
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = b'{"ok": true}'

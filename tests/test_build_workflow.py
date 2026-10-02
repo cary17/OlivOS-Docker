@@ -23,6 +23,35 @@ class WorkflowDispatchTests(unittest.TestCase):
         self.assertIn('echo "stable_should_build=false" >> "$GITHUB_OUTPUT"', workflow)
         self.assertIn('echo "testing_should_build=false" >> "$GITHUB_OUTPUT"', workflow)
 
+    def test_force_selection_executes_and_rejects_missing_releases(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        step = workflow.split('      - name: Detect latest OlivOS releases\n', 1)[1]
+        command = textwrap.dedent(step.split('        run: |\n', 1)[1].split('\n      - name:', 1)[0])
+        mock_python = '''python3() {
+          printf 'stable_raw_version=%s\\ntesting_raw_version=%s\\n' "$STABLE_VERSION" "$TESTING_VERSION" >> "$GITHUB_OUTPUT"
+          printf 'stable_should_build=true\\ntesting_should_build=true\\nany_should_build=true\\n' >> "$GITHUB_OUTPUT"
+        }
+        '''
+        for channel in ('none', 'stable', 'testing', 'both'):
+            rendered = command.replace('${{ steps.force.outputs.enabled }}', str(channel != 'none').lower())
+            rendered = rendered.replace('${{ steps.force.outputs.channel }}', channel)
+            for stable, testing in (('1.0', '1.1-rc.1'), ('', '1.1-rc.1'), ('1.0', ''), ('', '')):
+                with self.subTest(channel=channel, stable=stable, testing=testing):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        output = Path(tmp) / 'output'
+                        env = dict(os.environ, GITHUB_OUTPUT=str(output), STABLE_VERSION=stable, TESTING_VERSION=testing)
+                        result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', mock_python + rendered],
+                                                env=env, capture_output=True, text=True)
+                        missing = (channel in ('stable', 'both') and not stable) or (channel in ('testing', 'both') and not testing)
+                        self.assertEqual(result.returncode, 1 if missing else 0, result.stderr)
+                        if missing:
+                            self.assertIn('No release available', result.stderr)
+                            self.assertEqual(output.read_text().count('any_should_build='), 1)
+                            continue
+                        outputs = dict(line.split('=', 1) for line in output.read_text().splitlines())
+                        self.assertEqual(outputs['stable_should_build'], str(channel in ('none', 'stable', 'both')).lower())
+                        self.assertEqual(outputs['testing_should_build'], str(channel in ('none', 'testing', 'both')).lower())
+
     def test_force_refresh_and_record_use_image_artifacts(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertNotIn('full_only', workflow)
