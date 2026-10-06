@@ -87,8 +87,8 @@
     "updated_at": "2026-09-19 15:21:22 +0800"
   },
   "testing": {
-    "olivos_published_at": "2026-09-23 17:57:26 +0800",
-    "olivos_version": "0.11.90-alpha.4",
+    "olivos_published_at": "2026-10-07 01:04:53 +0800",
+    "olivos_version": "1.0.0-rc.1",
     "plugins": [
       {
         "asset": "OlivaDiceCore.opk",
@@ -162,23 +162,23 @@
       },
       {
         "asset": "OlivaDiceWebUI.opk",
-        "asset_id": 578968489,
+        "asset_id": 593397748,
         "name": "OlivaDiceWebUI.opk",
         "namespace": "OlivaDiceWebUI",
-        "published_at": "2026-09-21 20:09:38 +0800",
+        "published_at": "2026-09-28 01:23:15 +0800",
         "repo": "ShiaNyaa/OlivaDiceWebUI",
-        "sha256": "ac0d5725d57fd0464dcec8ac00e266b6d00e98d30326dbbd77a543a22d2e43b8",
-        "version": "v20260921(3)"
+        "sha256": "59c525d65a79dd9ab7d66da543cb3472274acadc2ad96eef85c015a3525eee1a",
+        "version": "v26.0928.01"
       },
       {
         "asset": "OlivaDiceWebUIStandalone.opk",
-        "asset_id": 578968490,
+        "asset_id": 593397747,
         "name": "OlivaDiceWebUIStandalone.opk",
         "namespace": "OlivaDiceWebUIStandalone",
-        "published_at": "2026-09-21 20:09:38 +0800",
+        "published_at": "2026-09-28 01:23:15 +0800",
         "repo": "ShiaNyaa/OlivaDiceWebUI",
-        "sha256": "8d448d7ca83d42b2aac64d6c89c4f94f16254e33946f5bad30d327c9880630fb",
-        "version": "v20260921(3)"
+        "sha256": "10e1462d1309c1256532cc1f7f6c1dcf3636639685a1b3da8dd83da9114408fa",
+        "version": "v26.0928.01"
       },
       {
         "name": "OlivOSOnebotV11.opk",
@@ -188,6 +188,6 @@
         "version": "0.9.6"
       }
     ],
-    "updated_at": "2026-09-23 18:14:57 +0800"
+    "updated_at": "2026-10-07 02:14:43 +0800"
   }
 }
