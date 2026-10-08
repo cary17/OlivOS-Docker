@@ -1,6 +1,6 @@
 # OlivOS Docker
 
-自动跟踪上游 [OlivOS](https://github.com/OlivOS-Team/OlivOS) Release，构建并发布多架构 Docker 镜像。工作流每 12 小时检查一次正式版和测试版；只有核心版本更新或手动强制构建才触发镜像构建，插件更新不会单独触发构建。
+手动触发工作流，检测上游 [OlivOS](https://github.com/OlivOS-Team/OlivOS) Release，构建并发布多架构 Docker 镜像。不再定时检测上游，不再执行月度保活推送或清理工作流运行记录。手动运行时检查正式版和测试版；只有核心版本更新或手动强制构建才触发镜像构建，插件更新不会单独触发构建。
 
 full 镜像在构建时获取插件，并包含仓库 `opk/` 下的本地插件。两个架构共享插件构建阶段；发布后按镜像 digest 校验插件文件、SHA-256 和双架构清单一致性，再用实际镜像清单更新 `build-record.json`，不重新下载插件来生成记录。
 
