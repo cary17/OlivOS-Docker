@@ -1,8 +1,6 @@
 name: Build and Push Docker Image
 
 on:
-  schedule:
-    - cron: '0 */12 * * *'
   workflow_dispatch:
     inputs:
       force_channel:
@@ -230,7 +228,7 @@ jobs:
           push: true
           build-args: |
             OLIVOS_RAW_VERSION=${{ steps.meta.outputs.raw_version }}
-            BUILD_TYPE=${{ steps.meta.outputs.build_type }}
+            BUILD_TYPE=${{ matrix.build_type }}
           tags: ${{ steps.meta.outputs.tags }}
           provenance: false
           sbom: false
