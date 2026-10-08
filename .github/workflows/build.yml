@@ -228,7 +228,7 @@ jobs:
           push: true
           build-args: |
             OLIVOS_RAW_VERSION=${{ steps.meta.outputs.raw_version }}
-            BUILD_TYPE=${{ matrix.build_type }}
+            BUILD_TYPE=${{ steps.meta.outputs.build_type }}
           tags: ${{ steps.meta.outputs.tags }}
           provenance: false
           sbom: false
