@@ -18,16 +18,13 @@ trap 'cleanup TERM' TERM
 trap 'cleanup INT' INT
 
 cd /app/OlivOS
-# 挂载目录只补充缺失插件，保留用户修改和已解包的同名插件。
+# 将镜像内置 OPK 移入挂载目录，覆盖同名文件或符号链接。
 if [ -d /opt/olivos/plugins ]; then
     mkdir -p plugin/app
     for plugin in /opt/olivos/plugins/*.opk; do
         [ -f "$plugin" ] || continue
         name=${plugin##*/}
-        if [ ! -e "plugin/app/$name" ] && [ ! -L "plugin/app/$name" ] && \
-           [ ! -e "plugin/app/${name%.opk}" ] && [ ! -L "plugin/app/${name%.opk}" ]; then
-            cp -n "$plugin" "plugin/app/$name"
-        fi
+        mv -fT "$plugin" "plugin/app/$name"
     done
 fi
 # Keep the process tree in a separate group without extra system packages.

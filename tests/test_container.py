@@ -144,14 +144,15 @@ class ContainerTests(unittest.TestCase):
                         pass
                     process.communicate(timeout=5)
 
-    def test_entrypoint_seeds_missing_plugins_without_overwriting_user_files(self):
+    def test_entrypoint_moves_bundled_plugins_over_same_named_user_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             app = root / 'app'
             app.mkdir()
             seed = root / 'seed'
             seed.mkdir()
-            (seed / 'demo.opk').write_bytes(b'bundled')
+            bundled = seed / 'demo.opk'
+            bundled.write_bytes(b'bundled')
             (app / 'main.py').write_text('import sys\nprint(sys.argv[1:])\nsys.exit(7)\n')
             entrypoint = (ROOT / 'entrypoint.sh').read_text().replace('/app/OlivOS', str(app))
             entrypoint = entrypoint.replace('/opt/olivos/plugins', str(seed))
@@ -166,23 +167,49 @@ class ContainerTests(unittest.TestCase):
             self.assertIn('hello', result.stdout)
             installed = app / 'plugin/app/demo.opk'
             self.assertEqual(installed.read_bytes(), b'bundled')
+            self.assertFalse(bundled.exists())
             installed.write_bytes(b'user-version')
             self.assertEqual(run().returncode, 7)
             self.assertEqual(installed.read_bytes(), b'user-version')
 
-            installed.unlink()
             unpacked = installed.with_suffix('')
             unpacked.mkdir()
+            unrelated = installed.with_name('user-only.opk')
+            unrelated.write_bytes(b'user-only')
+            bundled.write_bytes(b'new-bundled')
             self.assertEqual(run().returncode, 7)
-            self.assertFalse(installed.exists())
-            unpacked.rmdir()
-            installed.symlink_to(root / 'missing-target')
-            self.assertEqual(run().returncode, 7)
-            self.assertTrue(installed.is_symlink())
-            installed.unlink()
+            self.assertEqual(installed.read_bytes(), b'new-bundled')
+            self.assertFalse(bundled.exists())
+            self.assertTrue(unpacked.is_dir())
+            self.assertEqual(unrelated.read_bytes(), b'user-only')
 
-            self.assertEqual(run('cp() { return 31; };\n').returncode, 31)
-            (seed / 'demo.opk').unlink()
+            target_file = root / 'user-target'
+            target_file.write_bytes(b'user-target')
+            for target in (root / 'missing-target', target_file, unpacked):
+                with self.subTest(target=target):
+                    installed.unlink()
+                    installed.symlink_to(target)
+                    bundled.write_bytes(b'bundled')
+                    result = run()
+                    self.assertEqual(result.returncode, 7, result.stderr)
+                    self.assertFalse(installed.is_symlink())
+                    self.assertEqual(installed.read_bytes(), b'bundled')
+                    self.assertFalse(bundled.exists())
+            self.assertFalse((root / 'missing-target').exists())
+            self.assertEqual(target_file.read_bytes(), b'user-target')
+            self.assertEqual(list(unpacked.iterdir()), [])
+
+            installed.unlink()
+            installed.mkdir()
+            bundled.write_bytes(b'bundled')
+            result = run()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn('hello', result.stdout)
+            self.assertEqual(list(installed.iterdir()), [])
+            self.assertTrue(bundled.exists())
+            installed.rmdir()
+            self.assertEqual(run('mv() { return 31; };\n').returncode, 31)
+            bundled.unlink()
             self.assertEqual(run().returncode, 7)
             self.assertFalse(installed.exists())
             seed.rmdir()

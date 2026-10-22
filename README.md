@@ -80,9 +80,9 @@ docker compose logs -f olivos
 | `/opt/olivos/conf` | `/app/OlivOS/conf` | OlivOS 配置和账号信息 |
 | `/opt/olivos/plugin` | `/app/OlivOS/plugin` | 插件和插件数据 |
 
-full 镜像的内置插件与清单位于 `/opt/olivos/plugins`，不会被上述挂载遮蔽。启动时只向 `plugin/app/` 补充缺失的 OPK；已有同名 OPK、同名解包目录或符号链接均保留，不覆盖用户版本。core/dev 镜像不补充插件。
+full 镜像的内置插件与清单位于 `/opt/olivos/plugins`，不会被上述挂载遮蔽。启动时通过 `mv -fT` 将全部内置 OPK 移入 `plugin/app/`，无论挂载目录是否已有插件，均覆盖同名 OPK 文件或符号链接，不修改链接指向的文件或目录。其他插件和已有解包目录不删除；若目标同名 `.opk` 路径是实际目录，则报错停止启动，避免将 OPK 移入目录。core/dev 镜像不带入插件。
 
-更新镜像不会自动替换持久化目录中已有的插件。需要换用镜像内置版本时，先备份并移走对应的同名 OPK/解包目录，再重启容器；单纯删除内置 OPK 会在下次启动时重新补充。旧镜像没有 `/opt/olivos/plugins` 时，派生镜像入口会跳过初始化。
+新建或重建 full 容器会用镜像内置 OPK 覆盖挂载目录中的同名文件。移动后，源 OPK 在该容器中不再保留，因此同一容器重启不会再次覆盖或补回已删除的 OPK；需要重新带入时，运行 `docker compose up -d --force-recreate`。覆盖前请自行备份需要保留的同名 OPK。旧镜像没有 `/opt/olivos/plugins` 时，派生镜像入口会跳过初始化。
 
 ## 切换官方镜像版本
 
