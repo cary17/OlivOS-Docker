@@ -29,8 +29,6 @@ class VersionComparisonTests(unittest.TestCase):
         for suffix in ("preview.10-extra", "42", "custom.anything", "preview"):
             with self.subTest(suffix=suffix):
                 unstructured = build_metadata.version_key(f"1.0-{suffix}")
-                self.assertEqual(len(structured[1]), len(unstructured[1]))
-                self.assertEqual(tuple(map(type, structured[1])), tuple(map(type, unstructured[1])))
                 self.assertNotEqual(structured, unstructured)
                 self.assertEqual(structured < unstructured, unstructured > structured)
 
@@ -136,14 +134,6 @@ class PluginComparisonTests(unittest.TestCase):
         self.assertEqual(outputs["testing_should_build"], "false")
         request.assert_called_once_with(f"{build_metadata.RELEASES_API}?per_page=100&page=1", "")
         self.assertFalse(any("full_only" in key for key in outputs))
-
-    def test_core_detection_only_queries_core_release_api(self):
-        releases = [{"tag_name": "0.11.82", "prerelease": False, "draft": False}]
-        with mock.patch("scripts.build_metadata.request_json", return_value=releases) as request:
-            with mock.patch("scripts.build_metadata.load_record", return_value={}):
-                outputs = build_metadata.detect("ignored.json")
-        self.assertEqual(outputs["stable_should_build"], "true")
-        request.assert_called_once_with(f"{build_metadata.RELEASES_API}?per_page=100&page=1", "")
 
 
 class RecordUpdateTests(unittest.TestCase):

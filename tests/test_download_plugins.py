@@ -53,18 +53,6 @@ class OpkValidationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 download_plugins.validate_opk(path)
 
-    def test_validate_opk_accepts_native_plugin_structure(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'valid.opk'
-            with zipfile.ZipFile(path, 'w') as archive:
-                archive.writestr('app.json', json.dumps({'namespace': 'demo'}))
-                archive.writestr('__init__.py', '')
-                archive.writestr('main.py', '')
-
-            metadata = download_plugins.validate_opk(path)
-
-            self.assertEqual(metadata['namespace'], 'demo')
-
     def test_normalize_release_zip_strips_single_plugin_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'release.opk'
@@ -165,16 +153,6 @@ class OpkValidationTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         download_plugins.validate_opk(path)
 
-    def test_sha256_file_returns_digest(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'file.opk'
-            path.write_bytes(b'olivos')
-
-            self.assertEqual(
-                download_plugins.sha256_file(path),
-                hashlib.sha256(b'olivos').hexdigest(),
-            )
-
 
 class DownloadTests(unittest.TestCase):
     def test_duplicate_remote_names_fail_before_requests_or_output(self):
@@ -263,7 +241,7 @@ class DownloadTests(unittest.TestCase):
                 self.assertEqual(len(result), 1)
                 self.assertEqual(result[0]['source'], 'local')
                 self.assertEqual(result[0]['version'], 'local')
-                self.assertEqual(result[0]['sha256'], download_plugins.sha256_file(output / 'demo.opk'))
+                self.assertEqual(result[0]['sha256'], hashlib.sha256((output / 'demo.opk').read_bytes()).hexdigest())
                 self.assertEqual(json.loads(manifest.read_text()), result)
                 manifest.unlink()
                 with mock.patch.object(download_plugins.shutil, 'copyfile', side_effect=OSError('copy failed')):

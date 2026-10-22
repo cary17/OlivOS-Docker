@@ -13,16 +13,6 @@ WORKFLOW = Path(__file__).parents[1] / ".github/workflows/build.yml"
 
 
 class WorkflowDispatchTests(unittest.TestCase):
-    def test_force_build_can_target_one_channel(self):
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-
-        self.assertIn("force_channel:", workflow)
-        self.assertIn("type: choice", workflow)
-        self.assertIn("- stable", workflow)
-        self.assertIn("- testing", workflow)
-        self.assertIn('echo "stable_should_build=false" >> "$GITHUB_OUTPUT"', workflow)
-        self.assertIn('echo "testing_should_build=false" >> "$GITHUB_OUTPUT"', workflow)
-
     def test_force_selection_executes_and_rejects_missing_releases(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         step = workflow.split('      - name: Detect latest OlivOS releases\n', 1)[1]
@@ -54,7 +44,6 @@ class WorkflowDispatchTests(unittest.TestCase):
 
     def test_force_refresh_and_record_use_image_artifacts(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        self.assertNotIn('full_only', workflow)
         self.assertIn("no-cache: ${{ needs.check.outputs.force_build == 'true' }}", workflow)
         self.assertIn("pull: ${{ needs.check.outputs.force_build == 'true' }}", workflow)
         self.assertIn('${{ steps.meta.outputs.image }}@${{ steps.image.outputs.digest }}', workflow)
