@@ -1,6 +1,6 @@
 # OlivOS Docker
 
-手动触发工作流，检测上游 [OlivOS](https://github.com/OlivOS-Team/OlivOS) Release，构建并发布多架构 Docker 镜像。不再定时检测上游，不再执行月度保活推送或清理工作流运行记录。手动运行时检查正式版和测试版；只有核心版本更新或手动强制构建才触发镜像构建，插件更新不会单独触发构建。
+本项目基于免费开源的上游 [OlivOS](https://github.com/OlivOS-Team/OlivOS)，提供 Docker 镜像构建与部署配置。手动触发工作流，检测上游 Release，构建并发布多架构 Docker 镜像。不再定时检测上游，不再执行月度保活推送或清理工作流运行记录。手动运行时检查正式版和测试版；只有核心版本更新或手动强制构建才触发镜像构建，插件更新不会单独触发构建。
 
 full 镜像在构建时获取插件，并包含仓库 `opk/` 下的本地插件。两个架构共享插件构建阶段；发布后按镜像 digest 校验插件文件、SHA-256 和双架构清单一致性，再用实际镜像清单更新 `build-record.json`，不重新下载插件来生成记录。
 
@@ -387,3 +387,13 @@ sh -n entrypoint.sh download_source.sh
 docker compose config --quiet
 docker compose -f docker-compose.yml -f docker-compose.extra.yml config --quiet
 ```
+
+## 许可证
+
+除另有声明的第三方组件外，本项目采用与上游 OlivOS 一致的 **GNU Affero General Public License v3.0 或更新版本**（`AGPL-3.0-or-later`），完整条款见 [LICENSE](LICENSE)。
+
+上游 OlivOS 的版权声明：
+
+> Copyright (C) 2019-2021 lunzhiPenxil and OlivOS Team and contributors.
+
+第三方插件、依赖及基础镜像组件仍遵循各自的许可证，本项目的许可不替代其原有许可。OlivOS 形象图、项目图标等素材的授权范围以[上游许可与声明](https://github.com/OlivOS-Team/OlivOS#许可证)为准。
