@@ -11,5 +11,16 @@ services:
     volumes:
       - /opt/olivos/conf:/app/OlivOS/conf
       - /opt/olivos/plugin:/app/OlivOS/plugin
+      # 可选（仅 full 镜像需要）：暴露 WebUI 管理端口。默认不发布任何端口，
+      # 需要启用时绑定宿主机回环地址，不要写成 "8765:8765" 暴露到公网：
+      # - "127.0.0.1:8765:8765"
+      # 可选：持久化文件日志（容器重建后保留 ./logfile 下的日志文件）：
+      # - /opt/olivos/logfile:/app/OlivOS/logfile
+    # 可选：Docker 日志驱动轮转（只控制 stdout/stderr，不控制文件日志大小）：
+    # logging:
+    #   driver: json-file
+    #   options:
+    #     max-size: "10m"
+    #     max-file: "3"
     environment:
       TZ: Asia/Shanghai

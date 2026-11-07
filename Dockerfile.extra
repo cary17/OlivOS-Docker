@@ -1,5 +1,7 @@
 ARG BASE_IMAGE=ghcr.io/cary17/olivos:latest
 FROM ${BASE_IMAGE}
+# 临时回退用：--build-arg IMAGE_USER=root（安全代价见 README“运行用户”章节）。
+ARG IMAGE_USER=olivos
 
 USER root
 
@@ -18,4 +20,22 @@ RUN python -m pip install \
 # 覆盖旧基础镜像的入口，确保启动阶段不会再处理 EXTRA_PACKAGES。
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+# 自定义依赖只在上面的构建期以 root 安装，随后恢复经验证的非 root 身份。
+# 新基础镜像自带 olivos（UID/GID 10001）用户；旧基础镜像没有该用户时按相同
+# UID/GID 创建并授权镜像内运行时写入位置，不机械追加数字 USER。
+# 宿主机挂载的 conf/plugin 目录仍由部署方授权（见 README“运行用户”章节）。
+RUN if ! getent passwd olivos >/dev/null 2>&1; then \
+        groupadd --gid 10001 olivos && \
+        useradd --uid 10001 --gid 10001 --create-home --home-dir /home/olivos --shell /usr/sbin/nologin olivos; \
+    fi && \
+    chown -R olivos:olivos /app/OlivOS /home/olivos && \
+    if [ -d /opt/olivos/plugins ]; then chown -R olivos:olivos /opt/olivos/plugins; fi
+
+ENV HOME=/home/olivos
+
+# 临时回退（有安全代价，见 README）：确需沿用旧 root 行为时显式覆盖——
+#   docker build --build-arg IMAGE_USER=root -f Dockerfile.extra -t olivos-custom:latest .
+USER ${IMAGE_USER}
+
 ENTRYPOINT ["/entrypoint.sh"]

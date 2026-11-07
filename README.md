@@ -34,6 +34,18 @@ v0.11.81-dev
 
 `latest` 系列只指向正式版，Pre-release 只更新 `testing` 系列和对应具体版本标签。
 
+### 预装插件的渠道规则
+
+full 镜像的预装 OPK 跟随镜像渠道（仓库 `opk.txt` 声明的插件仓库）：
+
+- **stable 镜像**只预装各插件仓库的最新**正式发布**（GitHub Release 的 `prerelease` 标志为 false）。若某仓库不存在提供全部所需插件的正式发布，构建直接失败，不跳过插件、不预装测试版。
+- **testing 镜像**优先取最新的 prerelease；仅当最新 prerelease 的版本号低于最新正式版（或该仓库不存在 prerelease）时，回退预装正式版，此时清单中该插件标记 `prerelease: false`。
+- 候选发布必须同时提供该仓库所需的**全部**插件资产（且一一对应）；最新发布缺资产时会继续寻找较旧的完整发布。不含所需资产的脏 tag（如 `base-ea1`）不参与选择。
+- 版本比较沿用核心版本同一套排序语义（正式版高于同版本号 prerelease，`dev < alpha < beta < rc`，数字感知比较）。个别仓库存在无法按此语义比较的 tag（如 `base-ea1`、`v20260920(16)` 这类非语义化标签）时，同类别候选以及跨渠道比较均改按发布时间兜底，并在构建日志打印明确告警；发布时间缺失时构建失败。若上游修正了这类脏 tag 的元数据，建议及时反馈以收敛回版本语义比较。
+- 插件清单 `manifest.json` 为每个插件记录实际来源的 `prerelease` 布尔值、tag、资产与 SHA-256，供发布校验和 `build-record.json` 交叉核对。
+
+full 镜像额外安装上游 OlivOS 的 `extend` 可选依赖组（yaml、openpyxl、httpx、lxml 等插件生态依赖），构建期在运行层做 `pip check` 和必须模块导入检查；core/dev 镜像保持仅核心依赖，不额外扩张。
+
 手动运行构建工作流时，`force_channel` 可选择 `stable`、`testing` 或 `both`。选中渠道没有可用 Release 时会在构建前报错，不使用空版本构建。强制构建会跳过构建缓存并拉取基础镜像，重新获取插件；仍保留“不更新 `build-record.json`”的行为。需要固定到完全相同的镜像内容时，请使用 `image@sha256:...` 而非标签。
 
 ## 快速开始
@@ -83,6 +95,81 @@ docker compose logs -f olivos
 full 镜像的内置插件与清单位于 `/opt/olivos/plugins`，不会被上述挂载遮蔽。启动时通过 `mv -fT` 将全部内置 OPK 移入 `plugin/app/`，无论挂载目录是否已有插件，均覆盖同名 OPK 文件或符号链接，不修改链接指向的文件或目录。其他插件和已有解包目录不删除；若目标同名 `.opk` 路径是实际目录，则报错停止启动，避免将 OPK 移入目录。core/dev 镜像不带入插件。
 
 新建或重建 full 容器会用镜像内置 OPK 覆盖挂载目录中的同名文件。移动后，源 OPK 在该容器中不再保留，因此同一容器重启不会再次覆盖或补回已删除的 OPK；需要重新带入时，运行 `docker compose up -d --force-recreate`。覆盖前请自行备份需要保留的同名 OPK。旧镜像没有 `/opt/olivos/plugins` 时，派生镜像入口会跳过初始化。
+
+## 使用 full 镜像的 WebUI（可选，默认不开放）
+
+full 镜像内置的 `OlivaDiceWebUIStandalone` 插件会在容器内 `0.0.0.0:8765` 启动带管理令牌的 HTTP 服务（以构建时插件版本的配置为准）。默认的 Compose 配置**不发布任何宿主机端口**，`EXPOSE` 也不能代替端口发布。需要访问时：
+
+1. 在 `docker-compose.yml`（或 override 文件）中取消注释，绑定宿主机回环地址：
+
+   ```yaml
+   ports:
+     - "127.0.0.1:8765:8765"
+   ```
+
+   不要写成 `8765:8765`——插件默认监听 `0.0.0.0`，那样会把管理界面直接暴露到公网。然后 `docker compose up -d` 重建容器。
+
+2. 本机访问 `http://127.0.0.1:8765`；远程管理请优先通过 SSH 隧道：
+
+   ```bash
+   ssh -L 8765:127.0.0.1:8765 用户@服务器
+   ```
+
+3. 管理令牌位于容器内 `plugin/data/OlivaDiceWebUIStandalone/admin-token.txt`，默认对应宿主机 `/opt/olivos/plugin/data/OlivaDiceWebUIStandalone/admin-token.txt`。请勿在截图、CI 日志或公开场合展示该令牌。
+
+注意：默认不发布宿主机端口，不代表同一 Docker 网络中的其他容器无法访问该服务；请继续保护好令牌和数据目录。端口“可达”与“认证成功”是两回事——未认证时插件会拒绝管理操作，这是预期行为。
+
+## 提取上游配置模板（可选）
+
+bind mount 会用宿主机目录遮蔽镜像内的 `/app/OlivOS/conf`，因此用户看不到上游自带的 `account_template.json`、`plugin_priority.json` 等模板（OlivOS 首次启动会自动生成运行时默认值，功能不受影响）。需要查看模板时，从一个**不带挂载、不启动**的临时容器提取到独立目录，不会覆盖现有账号配置：
+
+```bash
+# 1. 记录当前镜像的固定 digest（示例）
+IMAGE_DIGEST=$(docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/cary17/olivos:latest)
+
+# 2. 创建临时容器（不启动），按需替换上面的 digest
+docker create --name olivos-template "$IMAGE_DIGEST"
+
+# 3. 复制模板到独立示例目录（不要直接复制整个 conf 到生产目录）
+mkdir -p ~/olivos-conf-template
+docker cp olivos-template:/app/OlivOS/conf/account_template.json ~/olivos-conf-template/
+docker cp olivos-template:/app/OlivOS/conf/plugin_priority.json ~/olivos-conf-template/
+
+# 4. 移除临时容器
+docker rm olivos-template
+```
+
+模板文件的存在与具体文件名随上游核心版本变化；若某个模板文件在当前版本不存在，说明上游已调整，请以官方文档为准。这只影响“参照模板”，不需要把模板复制回生产 `conf` 目录。
+
+## 多实例限制
+
+**同一套 `conf` / `plugin` 数据目录禁止多个运行中的容器实例共用**（包括 `docker run` 与 `docker compose up` 混用双开）。OlivOS 的插件解包与账号写入没有跨进程互斥，多实例共用会产生配置互覆盖与数据文件互踩。多实例部署时请为每个实例使用不同的宿主机目录、容器名和宿主机端口；切换部署方式（`docker run` 与 Compose 互切）前先停止旧实例。若持久化文件日志，`logfile` 目录也应按实例隔离。
+
+## 日志（可选持久化）
+
+容器内 `/app/OlivOS/logfile` 默认落在可写层，`docker rm` 后即丢失，`docker logs` 是唯一日志来源。需要保留文件日志时，按需追加挂载与 Docker 日志轮转（三部分相互独立、可单独启用）：
+
+```yaml
+services:
+  olivos:
+    ports:
+      - "127.0.0.1:8765:8765"  # 仅需要 full 镜像 WebUI 时启用
+    volumes:
+      - /opt/olivos/conf:/app/OlivOS/conf
+      - /opt/olivos/plugin:/app/OlivOS/plugin
+      - /opt/olivos/logfile:/app/OlivOS/logfile
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+```
+
+作为 override 合并时保留原有 conf/plugin 挂载；直接编辑完整 Compose 文件时也必须保留它们。需要说明的边界：
+
+- 文件日志挂载让日志跨容器重建保留；但 Docker 日志驱动的轮转只控制 stdout/stderr，**不控制** `/app/OlivOS/logfile` 下文件的大小与保留期。文件日志的容量、保留期、权限与宿主机磁盘告警由运维自行配置，不要对未知日志器套用可能导致其不再写入的轮转方式。
+- 容器 `running` 不代表文件日志仍在工作。只读挂载、权限错误和磁盘写满是不同的故障，需要分别验证。
+- 上游日志器在写失败后的重试/恢复属于上游实现，本项目当前未修改；文件日志失效时请优先检查挂载与磁盘状态。
 
 ## 切换官方镜像版本
 
@@ -309,6 +396,48 @@ docker push 用户名/olivos-custom:latest
 
 ```yaml
 image: 用户名/olivos-custom:latest
+```
+
+## 运行用户与非 root 迁移
+
+镜像默认以专用用户 `olivos`（UID/GID 固定为 `10001`）运行，不再是 root；镜像内的源码树、`/opt/olivos/plugins`（内置 OPK 的源目录）与 HOME 已在构建期授权给该用户。启动脚本**不会**递归修改宿主机目录属主，挂载的宿主机数据目录需要部署方自行授权。
+
+### 新部署
+
+创建数据目录并授权给 UID 10001 后再启动：
+
+```bash
+sudo mkdir -p /opt/olivos/conf /opt/olivos/plugin
+sudo chown -R 10001:10001 /opt/olivos/conf /opt/olivos/plugin
+# 如启用文件日志持久化：
+sudo mkdir -p /opt/olivos/logfile
+sudo chown -R 10001:10001 /opt/olivos/logfile
+```
+
+### 已有部署迁移
+
+1. 停止运行中的实例（`docker compose down` 或 `docker stop`），确认没有其他容器共用同一数据目录。
+2. 备份 `conf`、`plugin`（及 `logfile`）目录；备份中可能包含账号与令牌，按敏感数据保管。
+3. 检查目录内的符号链接与挂载边界，确认没有指向目录外的链接后再授权：
+
+   ```bash
+   sudo chown -R 10001:10001 /opt/olivos/conf /opt/olivos/plugin
+   ```
+
+4. 重新启动并观察日志。镜像属主迁移是独立操作：只回滚镜像**不会**撤销已执行的宿主机 `chown`，恢复属主时请单独记录并核对范围。
+
+### 权限不足时的行为
+
+数据目录未授权时，容器启动会**明确失败**（`mkdir: Permission denied` 或 `mv: cannot move` 等），并以非零退出码停止，不会静默回退为 root 运行。`docker logs` 中可见具体报错路径。
+
+### 派生镜像
+
+`Dockerfile.extra` 构建期以 root 安装自定义依赖，随后恢复与主镜像一致的非 root 身份：新基础镜像自带 `olivos` 用户；旧基础镜像缺少该用户时，派生镜像会按相同 UID/GID 创建并授权镜像内路径。
+
+确需临时沿用旧 root 行为时，可显式覆盖（有安全代价：OlivOS 及插件代码以 root 跑满全部能力，放大容器逃逸影响面；仅作为迁移过渡）：
+
+```bash
+docker build --build-arg IMAGE_USER=root -f Dockerfile.extra -t olivos-custom:latest .
 ```
 
 ## 常用维护命令

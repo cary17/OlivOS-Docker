@@ -1,6 +1,5 @@
 .git
 .github
-scripts
 tests
 __pycache__
 *.pyc

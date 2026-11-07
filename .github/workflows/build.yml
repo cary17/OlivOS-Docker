@@ -17,11 +17,9 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+# 默认仅读；需要写入的 job 单独声明最小权限。
 permissions:
-  contents: write
-  packages: write
-  attestations: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: olivos-docker-${{ github.ref }}
@@ -30,6 +28,8 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       stable_raw_version: ${{ steps.release.outputs.stable_raw_version }}
       stable_docker_tag: ${{ steps.release.outputs.stable_docker_tag }}
@@ -130,8 +130,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-      attestations: write
-      id-token: write
 
     steps:
       - name: Check channel build requirement
@@ -229,6 +227,10 @@ jobs:
           build-args: |
             OLIVOS_RAW_VERSION=${{ steps.meta.outputs.raw_version }}
             BUILD_TYPE=${{ steps.meta.outputs.build_type }}
+            PLUGIN_CHANNEL=${{ matrix.channel }}
+          # token 以 BuildKit secret 进入 plugins 阶段，不进 ARG/ENV/层文件。
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
           tags: ${{ steps.meta.outputs.tags }}
           provenance: false
           sbom: false
@@ -251,6 +253,7 @@ jobs:
         if: steps.channel.outputs.should_build == 'true' && matrix.build_type == 'full'
         env:
           IMAGE_REF: ${{ steps.meta.outputs.image }}@${{ steps.image.outputs.digest }}
+          PLUGIN_CHANNEL: ${{ matrix.channel }}
         run: |
           docker buildx imagetools inspect --raw "$IMAGE_REF" > image-index.json
           for arch in amd64 arm64; do
@@ -260,7 +263,7 @@ jobs:
             ' image-index.json)
             PLATFORM_REF="${IMAGE_REF%@*}@$digest"
             docker run --rm --platform "linux/$arch" --entrypoint python "$PLATFORM_REF" -c '
-          import hashlib, json
+          import hashlib, json, os
           from pathlib import Path
           root = Path("/opt/olivos/plugins")
           text = (root / "manifest.json").read_text()
@@ -268,10 +271,14 @@ jobs:
           names = [plugin["name"] for plugin in plugins]
           assert len(names) == len(set(names)), "Duplicate plugin names"
           assert set(names) == {p.name for p in root.glob("*.opk")}, "Plugin inventory mismatch"
+          channel = os.environ.get("PLUGIN_CHANNEL")
           for plugin in plugins:
               path = root / plugin["name"]
               with path.open("rb") as file:
                   assert hashlib.file_digest(file, "sha256").hexdigest() == plugin["sha256"], path
+              assert isinstance(plugin.get("prerelease"), bool), "prerelease must be a strict boolean: " + path.name
+              if plugin.get("source") != "local" and channel == "stable":
+                  assert plugin["prerelease"] is False, "stable image bundles a prerelease plugin: " + path.name
           print(text, end="")
           ' > "plugins-$arch.json"
           done

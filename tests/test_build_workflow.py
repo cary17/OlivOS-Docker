@@ -62,18 +62,88 @@ class WorkflowDispatchTests(unittest.TestCase):
             root = Path(tmp)
             plugin = root / 'demo.opk'
             plugin.write_bytes(b'plugin-data')
-            manifest = [{'name': plugin.name, 'sha256': hashlib.sha256(plugin.read_bytes()).hexdigest()}]
+            manifest = [{'name': plugin.name, 'prerelease': False,
+                         'sha256': hashlib.sha256(plugin.read_bytes()).hexdigest()}]
             (root / 'manifest.json').write_text(json.dumps(manifest))
             code = code.replace('/opt/olivos/plugins', tmp)
-            result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)
+            env = dict(os.environ, PLUGIN_CHANNEL='stable')
+            result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, env=env)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout), manifest)
             plugin.write_bytes(b'corrupt')
-            result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)
+            result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, env=env)
             self.assertNotEqual(result.returncode, 0)
+            plugin.write_bytes(b'plugin-data')
+            result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 0)
             plugin.unlink()
-            result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)
+            result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, env=env)
             self.assertNotEqual(result.returncode, 0)
+
+    def test_image_verifier_enforces_channel_and_boolean_prerelease(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        code = workflow.split("--entrypoint python \"$PLATFORM_REF\" -c '\n", 1)[1]
+        code = textwrap.dedent(code.split("\n          ' >", 1)[0])
+        self.assertIn('PLUGIN_CHANNEL', code)
+
+        def verify(manifest, channel):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                plugin = root / 'demo.opk'
+                plugin.write_bytes(b'plugin-data')
+                for entry in manifest:
+                    entry.setdefault('sha256', hashlib.sha256(plugin.read_bytes()).hexdigest())
+                (root / 'manifest.json').write_text(json.dumps(manifest))
+                code_run = code.replace('/opt/olivos/plugins', tmp)
+                return subprocess.run([sys.executable, '-c', code_run], capture_output=True, text=True,
+                                      env=dict(os.environ, PLUGIN_CHANNEL=channel))
+
+        remote = {'name': 'demo.opk', 'prerelease': True}
+        self.assertEqual(verify([remote], 'stable').returncode, 1)  # stable 不得预装 prerelease
+        self.assertEqual(verify([remote], 'testing').returncode, 0)  # testing 允许 prerelease
+        fallback = {'name': 'demo.opk', 'prerelease': False}
+        self.assertEqual(verify([fallback], 'testing').returncode, 0)  # testing 正式版回退合法
+        self.assertEqual(verify([fallback], 'stable').returncode, 0)
+        local_entry = {'name': 'demo.opk', 'prerelease': False, 'source': 'local'}
+        self.assertEqual(verify([local_entry], 'stable').returncode, 0)  # 渠道约束只针对远程插件
+        missing_flag = {'name': 'demo.opk'}
+        self.assertNotEqual(verify([missing_flag], 'stable').returncode, 0)
+        string_flag = {'name': 'demo.opk', 'prerelease': 'true'}
+        self.assertNotEqual(verify([string_flag], 'testing').returncode, 0)
+
+    def test_workflow_permissions_are_minimal(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        top_level = workflow.split('\njobs:', 1)[0]
+        self.assertIn('permissions:', top_level)
+        self.assertIn('contents: read', top_level)
+        self.assertNotIn('attestations: write', workflow)
+        self.assertNotIn('id-token: write', workflow)
+
+        check = workflow.split('\n  check:', 1)[1].split('\n  build:', 1)[0]
+        self.assertIn('contents: read', check)
+        self.assertNotIn('contents: write', check)
+        self.assertNotIn('packages: write', check)
+
+        build = workflow.split('\n  build:', 1)[1].split('\n  record:', 1)[0]
+        self.assertIn('contents: read', build)
+        self.assertIn('packages: write', build)
+        self.assertNotIn('contents: write', build)
+        self.assertNotIn('attestations: write', build)
+
+        record = workflow.split('\n  record:', 1)[1]
+        self.assertIn('contents: write', record)
+
+    def test_build_passes_channel_argument_and_token_secret(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn('PLUGIN_CHANNEL=${{ matrix.channel }}', workflow)
+        self.assertIn('secrets: |', workflow)
+        self.assertIn('github_token=${{ secrets.GITHUB_TOKEN }}', workflow)
+        # 渠道必须进入下载步骤的缓存键，使不同渠道不共享插件层缓存。
+        self.assertIn('cache-from: type=gha,scope=${{ matrix.channel }}-${{ matrix.build_type }}', workflow)
+        self.assertIn('cache-to: type=gha,mode=max,scope=${{ matrix.channel }}-${{ matrix.build_type }}', workflow)
+        # token 不允许经由 build-args 传递。
+        build_args = workflow.split('build-args: |', 1)[1].split('secrets:', 1)[0]
+        self.assertNotIn('GITHUB_TOKEN', build_args)
 
     def test_each_architecture_uses_its_child_digest(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")

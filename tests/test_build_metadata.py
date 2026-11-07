@@ -1,6 +1,10 @@
 import json
 import tempfile
+import time
 import unittest
+import urllib.error
+import urllib.request
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -248,20 +252,212 @@ class NetworkRequestTests(unittest.TestCase):
             self.assertEqual(build_metadata.fetch_releases(""), [])
         self.assertEqual(request.call_count, 1)
 
-    def test_request_json_retries_temporary_network_failure(self):
+    def test_fetch_releases_rejects_non_list_payload(self):
+        with mock.patch("scripts.build_metadata.request_json", return_value={"message": "nope"}):
+            with self.assertRaisesRegex(RuntimeError, "expected a JSON list"):
+                build_metadata.fetch_releases("")
+
+    def test_fetch_releases_budget_exhaustion_fails_loud(self):
+        full_page = [{"tag_name": "filler"}] * 100
+        with mock.patch("scripts.build_metadata.request_json", return_value=full_page):
+            with self.assertRaisesRegex(RuntimeError, "pagination budget"):
+                build_metadata.fetch_releases("")
+
+    def _open_response(self, payload=b'{"ok": true}'):
         response = mock.MagicMock()
-        response.__enter__.return_value.read.return_value = b'{"ok": true}'
+        response.__enter__.return_value.read.return_value = payload
+        return response
+
+    def test_request_json_retries_temporary_network_failure(self):
+        response = self._open_response()
         with (
-            mock.patch(
-                "scripts.build_metadata.urllib.request.urlopen",
-                side_effect=[OSError("temporary"), response],
-            ) as urlopen,
+            mock.patch.object(build_metadata.JSON_OPENER, "open",
+                              side_effect=[OSError("temporary"), response]) as opener,
             mock.patch("scripts.build_metadata.time.sleep"),
         ):
             result = build_metadata.request_json("https://example.com/data", retries=2)
 
         self.assertEqual(result, {"ok": True})
-        self.assertEqual(urlopen.call_count, 2)
+        self.assertEqual(opener.call_count, 2)
+
+    def test_request_json_retries_decoding_failures_then_succeeds(self):
+        bad = self._open_response(b"{oops")
+        good = self._open_response()
+        with (
+            mock.patch.object(build_metadata.JSON_OPENER, "open", side_effect=[bad, good]),
+            mock.patch("scripts.build_metadata.time.sleep"),
+        ):
+            self.assertEqual(build_metadata.request_json("https://example.com/data", retries=2), {"ok": True})
+
+    def test_request_json_invalid_encoding_is_retried_with_context(self):
+        bad = self._open_response(b"\x80\x81invalid-utf8")
+        with (
+            mock.patch.object(build_metadata.JSON_OPENER, "open", return_value=bad),
+            mock.patch("scripts.build_metadata.time.sleep"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "https://example.com/data.*attempt.*decode"):
+                build_metadata.request_json("https://example.com/data", retries=2)
+
+    def test_request_json_rate_limit_headers_are_validated_and_waited(self):
+        import email.message
+        headers = email.message.Message()
+        headers["X-RateLimit-Remaining"] = "0"
+        headers["X-RateLimit-Reset"] = str(int(time.time()) + 1)
+        limited = urllib.error.HTTPError("https://api.github.com/x", 403, "rate limited", headers, None)
+        good = self._open_response()
+        sleeps = []
+        with (
+            mock.patch.object(build_metadata.JSON_OPENER, "open", side_effect=[limited, good]),
+            mock.patch("scripts.build_metadata.time.sleep", side_effect=sleeps.append),
+        ):
+            self.assertEqual(build_metadata.request_json("https://api.github.com/x", retries=2), {"ok": True})
+        self.assertTrue(sleeps and sleeps[0] <= 5)
+
+    def test_request_json_rate_limit_beyond_budget_fails_without_hour_sleep(self):
+        import email.message
+        headers = email.message.Message()
+        headers["X-RateLimit-Remaining"] = "0"
+        headers["X-RateLimit-Reset"] = str(int(time.time()) + 3600)
+        limited = urllib.error.HTTPError("https://api.github.com/x", 403, "rate limited", headers, None)
+        sleeps = []
+        with (
+            mock.patch.object(build_metadata.JSON_OPENER, "open", side_effect=[limited]),
+            mock.patch("scripts.build_metadata.time.sleep", side_effect=sleeps.append),
+            mock.patch.object(build_metadata, "REQUEST_TIME_BUDGET", 60),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "rate limit window exceeds request budget"):
+                build_metadata.request_json("https://api.github.com/x", retries=3)
+        self.assertEqual(sleeps, [])
+
+    def test_request_json_plain_403_is_not_treated_as_rate_limit(self):
+        limited = urllib.error.HTTPError("https://api.github.com/x", 403, "forbidden", {}, None)
+        with mock.patch.object(build_metadata.JSON_OPENER, "open", side_effect=[limited]) as opener:
+            with self.assertRaisesRegex(RuntimeError, "HTTP 403"):
+                build_metadata.request_json("https://api.github.com/x", retries=3)
+        self.assertEqual(opener.call_count, 1)
+
+    def test_request_json_401_fails_fast(self):
+        unauthorized = urllib.error.HTTPError("https://api.github.com/x", 401, "bad credentials", {}, None)
+        with mock.patch.object(build_metadata.JSON_OPENER, "open", side_effect=[unauthorized]) as opener:
+            with self.assertRaisesRegex(RuntimeError, "HTTP 401"):
+                build_metadata.request_json("https://api.github.com/x", retries=3)
+        self.assertEqual(opener.call_count, 1)
+
+    def test_request_json_500_is_retried(self):
+        busy = urllib.error.HTTPError("https://api.github.com/x", 502, "bad gateway", {}, None)
+        good = self._open_response()
+        with (
+            mock.patch.object(build_metadata.JSON_OPENER, "open", side_effect=[busy, good]),
+            mock.patch("scripts.build_metadata.time.sleep"),
+        ):
+            self.assertEqual(build_metadata.request_json("https://api.github.com/x", retries=2), {"ok": True})
+
+    def test_request_json_429_uses_valid_retry_after(self):
+        import email.message
+        headers = email.message.Message()
+        headers["Retry-After"] = "0"
+        limited = urllib.error.HTTPError("https://api.github.com/x", 429, "slow down", headers, None)
+        good = self._open_response()
+        with (
+            mock.patch.object(build_metadata.JSON_OPENER, "open", side_effect=[limited, good]),
+            mock.patch("scripts.build_metadata.time.sleep"),
+        ):
+            self.assertEqual(build_metadata.request_json("https://api.github.com/x", retries=2), {"ok": True})
+
+    def test_request_json_429_with_invalid_retry_after_fails(self):
+        import email.message
+        headers = email.message.Message()
+        headers["Retry-After"] = "not-a-number"
+        limited = urllib.error.HTTPError("https://api.github.com/x", 429, "slow down", headers, None)
+        with (
+            mock.patch.object(build_metadata.JSON_OPENER, "open", side_effect=[limited]),
+            mock.patch("scripts.build_metadata.time.sleep") as sleeper,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "rate limit window exceeds request budget"):
+                build_metadata.request_json("https://api.github.com/x", retries=3)
+        sleeper.assert_not_called()
+
+    def test_request_json_token_is_not_leaked_in_errors(self):
+        unauthorized = urllib.error.HTTPError("https://api.github.com/x", 401, "no", {}, None)
+        with mock.patch.object(build_metadata.JSON_OPENER, "open", side_effect=[unauthorized]):
+            with self.assertRaises(RuntimeError) as caught:
+                build_metadata.request_json("https://api.github.com/x", token="super-secret-token")
+        message = str(caught.exception)
+        self.assertNotIn("super-secret-token", message)
+        self.assertNotIn("Bearer", message)
+
+    def test_request_json_token_is_only_used_for_github_api(self):
+        captured = []
+
+        def fake_open(request, timeout):
+            captured.append(request)
+            return self._open_response()
+
+        with mock.patch.object(build_metadata.JSON_OPENER, "open", side_effect=fake_open):
+            build_metadata.request_json("https://api.github.com/repos/o/r", token="secret")
+            build_metadata.request_json("https://example.com/data", token="secret")
+        self.assertTrue(captured[0].has_header("Authorization"))
+        self.assertFalse(captured[1].has_header("Authorization"))
+
+    def test_cross_host_redirect_drops_authorization(self):
+        handler = build_metadata._NoCrossHostAuthRedirect()
+        request = urllib.request.Request("https://api.github.com/x", headers={"Authorization": "Bearer secret"})
+        same_host = handler.redirect_request(request, None, 302, "Found", {}, "https://api.github.com/y")
+        self.assertTrue(same_host.has_header("Authorization"))
+        cross_host = handler.redirect_request(request, None, 302, "Found", {}, "https://evil.example/y")
+        self.assertFalse(cross_host.has_header("Authorization"))
+
+
+class UnknownPublishTimeTests(unittest.TestCase):
+    def test_beijing_time_never_invents_now(self):
+        self.assertEqual(build_metadata.beijing_time(None), "")
+        self.assertEqual(build_metadata.beijing_time(""), "")
+        self.assertEqual(build_metadata.beijing_time("   "), "")
+        self.assertEqual(build_metadata.beijing_time("not-a-timestamp"), "")
+
+    def test_beijing_time_formats_known_inputs(self):
+        self.assertEqual(build_metadata.beijing_time("2026-01-02T00:00:00Z"), "2026-01-02 08:00:00 +0800")
+        self.assertEqual(build_metadata.beijing_time("2026-01-02 08:00:00 +0800"), "2026-01-02 08:00:00 +0800")
+
+    def test_missing_publish_time_stays_empty_through_selection(self):
+        releases = [{"tag_name": "0.11.81", "draft": False, "prerelease": False}]
+        selected = build_metadata.select_latest_releases(releases)
+        self.assertEqual(selected["stable"]["published_at"], "")
+
+    def test_same_version_with_unknown_times_does_not_rebuild(self):
+        self.assertFalse(build_metadata.time_newer("", ""))
+        self.assertFalse(build_metadata.time_newer(None, ""))
+        self.assertFalse(build_metadata.time_newer("garbage", ""))
+
+    def test_valid_remote_time_builds_when_local_is_unknown(self):
+        self.assertTrue(build_metadata.time_newer("2026-01-02T00:00:00Z", ""))
+
+    def test_update_record_writes_real_now(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record_path = Path(tmp) / "build-record.json"
+            plugins_path = Path(tmp) / "plugins.json"
+            plugins_path.write_text("[]", encoding="utf-8")
+            before = build_metadata.parse_time(
+                datetime.now(build_metadata.BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S %z"))
+            build_metadata.update_record(record_path, "stable", "0.11.81", "", plugins_path)
+            data = json.loads(record_path.read_text(encoding="utf-8"))
+            updated = build_metadata.parse_time(data["stable"]["updated_at"])
+            self.assertIsNotNone(updated)
+            self.assertLess(abs((updated - before).total_seconds()), 300)
+            self.assertEqual(data["stable"]["olivos_published_at"], "")
+
+    def test_old_record_without_new_fields_stays_readable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record_path = Path(tmp) / "build-record.json"
+            record_path.write_text(json.dumps({
+                "stable": {"olivos_version": "0.11.80", "plugins": [{"name": "old.opk"}]},
+            }), encoding="utf-8")
+            plugins_path = Path(tmp) / "plugins.json"
+            plugins_path.write_text("[]", encoding="utf-8")
+            build_metadata.update_record(record_path, "testing", "0.11.81-rc.1", "", plugins_path)
+            data = json.loads(record_path.read_text(encoding="utf-8"))
+            self.assertEqual(data["stable"]["plugins"], [{"name": "old.opk"}])
+            self.assertEqual(data["testing"]["olivos_version"], "0.11.81-rc.1")
 
 
 if __name__ == "__main__":
