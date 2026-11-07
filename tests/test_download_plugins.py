@@ -589,13 +589,13 @@ class WorkerWatchdogTests(unittest.TestCase):
                 download_plugins._run_asset_job(job, target=_resource_probe)
 
     def test_worker_limit_uses_configured_address_space(self):
-        import resource
-        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-        try:
+        # 不在测试进程内真正收紧 RLIMIT_AS：硬上限降低后不可恢复，
+        # 在 GitHub runner 等环境会失败。这里验证接线值；
+        # 限制的真实应用由 spawn worker 用例覆盖。
+        with mock.patch.object(download_plugins.resource, 'setrlimit') as setter:
             download_plugins._apply_worker_limits({'address_space': 256 * 1024**2})
-            self.assertEqual(resource.getrlimit(resource.RLIMIT_AS)[0], 256 * 1024**2)
-        finally:
-            resource.setrlimit(resource.RLIMIT_AS, (soft, hard))
+            setter.assert_called_once_with(
+                __import__('resource').RLIMIT_AS, (256 * 1024**2, 256 * 1024**2))
 
     def test_asset_worker_reports_and_cleans_without_committing(self):
         with tempfile.TemporaryDirectory() as tmp:
