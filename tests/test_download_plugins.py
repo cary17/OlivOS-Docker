@@ -182,7 +182,7 @@ class DownloadTests(unittest.TestCase):
             root = Path(tmp)
             opk_list = root / 'opk.txt'
             opk_list.write_text(''.join(
-                f'{name}:https://github.com/ShiaNyaa/OlivaDiceWebUI/releases\n' for name in names))
+                f'{name}:https://github.com/OlivOS-Team/OlivaDiceWebUI/releases\n' for name in names))
             release = {'tag_name': 'v20260920(16)', 'assets': [
                 {'name': name, 'label': f'UI timestamp version {index}',
                  'browser_download_url': f'https://example.com/{name}'}
