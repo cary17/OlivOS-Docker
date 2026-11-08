@@ -738,30 +738,12 @@ class ChannelSelectionTests(unittest.TestCase):
                 RuntimeError, r"owner/repo providing \['x\.opk'\] \(channel testing\)"):
             download_plugins.select_channel_release(releases, ['x.opk'], 'testing', 'owner/repo')
 
-    def test_same_category_incomparable_tags_fall_back_to_publish_time(self):
-        releases = [
-            self.release('v20260920(16)', published='2026-09-20T00:00:00Z'),
-            self.release('v26.1001.02', published='2026-10-01T00:00:00Z'),
-        ]
-        tag, _ = self.decision(releases, 'stable')
-        self.assertEqual(tag, 'v26.1001.02')
-
     def test_incomparable_category_without_publish_time_fails(self):
         releases = [self.release('v20260920(16)', published=''), self.release('3.1.6(1011)', published='')]
         with self.assertRaisesRegex(RuntimeError, 'incomparable'):
             self.decision(releases, 'stable')
 
-    def test_cross_channel_incomparable_tags_fall_back_to_publish_time_with_warning(self):
-        # base-ea1（prerelease）与 3.0.18 无法按版本语义比较：经确认的例外，
-        # 按有效发布时间兜底并打印告警——2021 年的 prerelease 不应胜过 2026 年的正式版。
-        releases = [
-            self.release('v20260920(16)', published='2026-09-20T00:00:00Z'),
-            self.release('2.0.0-rc.1', prerelease=True, published='2021-11-20T10:41:09Z'),
-        ]
-        tag, _ = self.decision(releases, 'testing')
-        self.assertEqual(tag, 'v20260920(16)')
-
-    def test_cross_channel_incomparable_without_publish_time_still_fails(self):
+    def test_cross_channel_date_tags_without_publish_time_fail(self):
         releases = [
             self.release('v20260920(16)', published='2026-09-20T00:00:00Z'),
             self.release('2.0.0-rc.1', prerelease=True, published=''),
@@ -769,13 +751,46 @@ class ChannelSelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'publish times are missing'):
             self.decision(releases, 'testing')
 
-    def test_cross_channel_incomparable_newer_prerelease_wins_by_publish_time(self):
+    def test_base_series_is_pre_numeric_and_falls_back_to_stable_by_version(self):
+        # OlivaDiceJoy 真实形态：base-eaN 是编号前的"基础系列" prerelease，
+        # 语义上早于一切数字主段——testing 按版本规则回退正式版，不依赖发布时间。
         releases = [
-            self.release('1.0.0', published='2020-01-01T00:00:00Z'),
-            self.release('base-ea1', prerelease=True, published='2026-11-01T00:00:00Z'),
+            self.release('3.0.18', published='2026-10-08T00:00:00Z'),
+            self.release('base-ea2', published='2021-12-10T00:00:00Z'),      # API 标为正式版
+            self.release('base-ea1', prerelease=True, published='2021-11-20T00:00:00Z'),
         ]
         tag, _ = self.decision(releases, 'testing')
-        self.assertEqual(tag, 'base-ea1')
+        self.assertEqual(tag, '3.0.18')
+
+    def test_base_series_orders_among_itself(self):
+        key1 = download_plugins._plugin_version_key('base-ea1')
+        key2 = download_plugins._plugin_version_key('base-ea2')
+        self.assertLess(key1, key2)
+        self.assertLess(download_plugins._plugin_version_key('base-ea1'),
+                        download_plugins._plugin_version_key('3.0.0'))
+        # 无后缀的裸系列名是该系列的正式形态，高于其 prerelease（同 1.0.0 > 1.0.0-rc.1）。
+        self.assertLess(download_plugins._plugin_version_key('base-ea1'),
+                        download_plugins._plugin_version_key('base'))
+
+    def test_bracket_build_orders_after_same_numeric_version(self):
+        self.assertLess(download_plugins._plugin_version_key('3.0.2(10)'),
+                        download_plugins._plugin_version_key('3.0.2(16)'))
+        self.assertLess(download_plugins._plugin_version_key('3.0.2(10)'),
+                        download_plugins._plugin_version_key('3.0.3'))
+        self.assertLess(download_plugins._plugin_version_key('3.0.2-rc.1(10)'),
+                        download_plugins._plugin_version_key('3.0.2(1)'))
+        # 疑似日期式的单段数字加构建号：语义不可靠，交回发布时间兜底。
+        self.assertIsNone(download_plugins._plugin_version_key('v20260920(16)'))
+        self.assertIsNotNone(download_plugins._plugin_version_key('v26.1028.01'))
+
+    def test_date_style_bracket_tags_keep_publish_time_fallback(self):
+        # 不同日历格式不强行折算成版本号：含日期式 tag 的类别仍按发布时间兜底。
+        releases = [
+            self.release('v20260920(16)', published='2026-09-20T00:00:00Z'),
+            self.release('v26.1001.02', published='2026-10-01T00:00:00Z'),
+        ]
+        tag, _ = self.decision(releases, 'stable')
+        self.assertEqual(tag, 'v26.1001.02')
 
     def test_version_ties_use_publish_time_then_id(self):
         releases = [

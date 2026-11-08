@@ -437,22 +437,59 @@ def _complete_releases(releases, required_names):
     return complete
 
 
-def _tag_comparable(tag):
-    """主段是否完全由数字段构成；被 version_key 折叠为 0 的退化主段不可比较。"""
-    main = normalize_version(tag).partition('-')[0]
-    return bool(main) and all(part.isdigit() for part in main.split('.'))
+def _plugin_version_key(tag):
+    """插件侧扩展版本比较键：在核心 version_key 语义上适配真实插件 tag 写法。
+
+    - 纯数字主段（可带 prerelease 后缀）：原样使用核心语义，层级 (1, ...)
+    - 多段数字主段 + 尾部括号构建号（3.0.2(10)）：主段语义 + 构建号次序
+    - 单词主段（base-ea1）：视为编号前的"基础系列"，层级 (0, ...)，排于一切
+      数字主段之前；系列内按后缀解析（ea1 < ea2）
+    - 其余（如疑似日期式的单段数字加构建号 v20260920(16)）：返回 None，
+      由调用方按发布时间兜底并告警；不同日历格式不强行折算成版本号
+    """
+    tag = normalize_version(tag or '')
+    build = None
+    bracket = re.fullmatch(r'(?P<body>.+)\((?P<build>\d+)\)', tag)
+    if bracket:
+        tag, build = bracket.group('body'), int(bracket.group('build'))
+    main, separator, suffix = tag.partition('-')
+    if main and all(part.isdigit() for part in main.split('.')):
+        if build is not None and '.' not in main:
+            return None
+        key = (1,) + version_key(tag)
+        return key + ((build,) if build is not None else ())
+    if main:
+        series = main.lower()
+        suffix_key = version_key('0-' + suffix)[1] if separator else (1,)
+        key = (0, series, suffix_key)
+        return key + ((build,) if build is not None else ())
+    return None
+
+
+def _uses_extended_tag_form(tag):
+    """非标准但可比较的写法（单词主段或括号构建号）；排序假设需要告警。"""
+    tag = normalize_version(tag or '')
+    if re.fullmatch(r'.+\(\d+\)', tag):
+        return True
+    main = tag.partition('-')[0]
+    return bool(main) and not all(part.isdigit() for part in main.split('.'))
 
 
 def _pick_category_latest(candidates, repo, label):
     """Pick the newest release within one S/P category.
 
-    可比较时按 version_key 选择，同 key 用有效发布时间与 release id 次级
-    排序；类别内存在不可比较主段时整体按发布时间兜底并告警，时间缺失
-    则失败。单个候选无需比较，直接选用。
+    全部候选可用插件侧比较键排序时按 (key, 有效发布时间, release id) 取最新；
+    存在不可比较 tag 的类别整体按有效发布时间兜底并告警，时间缺失则失败。
+    单个候选无需比较，直接选用。
     """
     if len(candidates) == 1:
         return candidates[0]
-    if any(not _tag_comparable(release.get('tag_name') or '') for release, _ in candidates):
+    keys = [_plugin_version_key(release.get('tag_name') or '') for release, _ in candidates]
+    for release, _ in candidates:
+        if _uses_extended_tag_form(release.get('tag_name') or ''):
+            print(f"WARNING: {repo} {label} release tag {release.get('tag_name')!r} "
+                  "uses a non-standard version form; ordered by the extended plugin comparator")
+    if any(key is None for key in keys):
         times = [parse_time(release.get('published_at')) for release, _ in candidates]
         if any(moment is None for moment in times):
             raise RuntimeError(
@@ -469,7 +506,7 @@ def _pick_category_latest(candidates, repo, label):
         release, _ = item
         moment = parse_time(release.get('published_at'))
         return (
-            version_key(release.get('tag_name') or ''),
+            _plugin_version_key(release.get('tag_name') or ''),
             moment or datetime.min.replace(tzinfo=BEIJING_TZ),
             release.get('id') or 0,
         )
@@ -501,10 +538,11 @@ def select_channel_release(releases, required_names, channel, repo):
     prerelease_pick = _pick_category_latest(prerelease, repo, 'prerelease')
     stable_tag = stable_pick[0].get('tag_name') or ''
     prerelease_tag = prerelease_pick[0].get('tag_name') or ''
-    if not (_tag_comparable(stable_tag) and _tag_comparable(prerelease_tag)):
-        # 跨渠道版本语义无法比较时（如 base-ea1 vs 3.0.18）按发布时间兜底，
-        # 并打印明确告警——这是经确认的例外，不允许无告警的静默降级；
-        # 发布时间缺失时仍然失败。
+    stable_key = _plugin_version_key(stable_tag)
+    prerelease_key = _plugin_version_key(prerelease_tag)
+    if stable_key is None or prerelease_key is None:
+        # 仅当扩展比较器也无法解析（如不同日历格式的日期式 tag）时，
+        # 才按发布时间兜底，并打印明确告警——不允许无告警的静默降级。
         stable_time = parse_time(stable_pick[0].get('published_at'))
         prerelease_time = parse_time(prerelease_pick[0].get('published_at'))
         if stable_time is None or prerelease_time is None:
@@ -518,7 +556,7 @@ def select_channel_release(releases, required_names, channel, repo):
         if (prerelease_time, prerelease_pick[0].get('id') or 0) >= (stable_time, stable_pick[0].get('id') or 0):
             return prerelease_pick
         return stable_pick
-    if version_key(prerelease_tag) >= version_key(stable_tag):
+    if prerelease_key >= stable_key:
         return prerelease_pick
     return stable_pick
 
